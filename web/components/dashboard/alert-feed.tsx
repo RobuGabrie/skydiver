@@ -1,11 +1,12 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Alert } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { AlertTriangle, Info, XCircle, CheckCircle2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { formatDistanceToNow } from "date-fns"
+import { formatDistance } from "date-fns"
 
 const SEVERITY_CONFIG = {
   critical: {
@@ -39,8 +40,19 @@ export function AlertFeed({
   onAcknowledgeAll: () => void
   maxItems?: number
 }) {
+  const [now, setNow] = useState<number | null>(null)
   const visible = alerts.slice(0, maxItems)
   const unread = alerts.filter(a => !a.acknowledged).length
+
+  useEffect(() => {
+    const syncNow = () => setNow(Date.now())
+    const timeout = setTimeout(syncNow, 0)
+    const interval = setInterval(syncNow, 60_000)
+    return () => {
+      clearTimeout(timeout)
+      clearInterval(interval)
+    }
+  }, [])
 
   return (
     <div className="flex flex-col gap-2">
@@ -87,8 +99,8 @@ export function AlertFeed({
                   {alert.threshold && <> · Threshold: {alert.threshold}</>}
                 </p>
               )}
-              <p className="text-xs text-muted-foreground mt-1">
-                {formatDistanceToNow(alert.timestamp, { addSuffix: true })}
+              <p className="text-xs text-muted-foreground mt-1" suppressHydrationWarning>
+                {now === null ? "just now" : formatDistance(alert.timestamp, now, { addSuffix: true })}
               </p>
             </div>
             {!alert.acknowledged && (

@@ -6,7 +6,6 @@ import React, {
   useRef,
   useState,
 } from 'react'
-import { Platform } from 'react-native'
 import { BleManager, Device, State, Subscription } from 'react-native-ble-plx'
 import {
   BLE_CMD_CHAR_UUID,
@@ -22,6 +21,8 @@ import {
   parseFastPacket,
   parseSlowPacket,
 } from './bleProtocol'
+import { enqueueTelemetryEvent } from './telemetryQueue'
+import type { SlowTelemetryEvent } from './types'
 
 export interface ScannedDevice {
   id: string
@@ -61,16 +62,46 @@ const BleContext = createContext<BleContextValue>({
 
 export function BleProvider({ children }: { children: React.ReactNode }) {
   const managerRef = useRef<BleManager | null>(null)
-  const deviceRef  = useRef<Device | null>(null)
-  const notifSubs  = useRef<Subscription[]>([])
+  const deviceRef = useRef<Device | null>(null)
+  const notifSubs = useRef<Subscription[]>([])
+  const sessionIdRef = useRef('')
+  const sequenceRef = useRef(0)
 
-  const [bleReady,     setBleReady]     = useState(false)
-  const [scanning,     setScanning]     = useState(false)
-  const [devices,      setDevices]      = useState<ScannedDevice[]>([])
-  const [connectedId,  setConnectedId]  = useState<string | null>(null)
-  const [rssi,         setRssi]         = useState(0)
-  const [fastPacket,   setFastPacket]   = useState<FastPacket | null>(null)
-  const [slowPacket,   setSlowPacket]   = useState<SlowPacket | null>(null)
+  const [bleReady, setBleReady] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [devices, setDevices] = useState<ScannedDevice[]>([])
+  const [connectedId, setConnectedId] = useState<string | null>(null)
+  const [rssi, setRssi] = useState(0)
+  const [fastPacket, setFastPacket] = useState<FastPacket | null>(null)
+  const [slowPacket, setSlowPacket] = useState<SlowPacket | null>(null)
+
+  function createSessionId(deviceId: string) {
+    return `session-${deviceId}-${Date.now()}`
+  }
+
+  function queueSlowPacket(deviceId: string, packet: SlowPacket) {
+    if (!sessionIdRef.current) return
+
+    sequenceRef.current += 1
+
+    const event: SlowTelemetryEvent = {
+      eventId: `${sessionIdRef.current}-${sequenceRef.current}`,
+      sessionId: sessionIdRef.current,
+      deviceId,
+      sequence: packet.seq,
+      timestamp: Date.now(),
+      kind: 'slow',
+      data: {
+        heartRate: packet.bpm,
+        oxygen: packet.spo2,
+        stress: packet.stressPct,
+        temperature: packet.tempC,
+        battery: packet.battPct,
+      },
+    }
+
+    enqueueTelemetryEvent(event).catch(() => {})
+  }
 
   // ------------------------------------------------------------------
   // Initialise the manager once and watch BLE radio state
@@ -139,6 +170,8 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
     if (!manager) return
 
     stopScan()
+    sessionIdRef.current = createSessionId(deviceId)
+    sequenceRef.current = 0
 
     const device = await manager.connectToDevice(deviceId, {
       requestMTU: 247,
@@ -171,7 +204,10 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
         if (err || !char?.value) return
         const bytes = decodeNotification(char.value)
         const pkt = parseSlowPacket(bytes)
-        if (pkt) setSlowPacket(pkt)
+        if (!pkt) return
+
+        setSlowPacket(pkt)
+        queueSlowPacket(device.id, pkt)
       },
     )
 
@@ -182,6 +218,8 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
       notifSubs.current.forEach(s => s.remove())
       notifSubs.current = []
       deviceRef.current = null
+      sessionIdRef.current = ''
+      sequenceRef.current = 0
       setConnectedId(null)
       setFastPacket(null)
       setSlowPacket(null)
@@ -205,6 +243,8 @@ export function BleProvider({ children }: { children: React.ReactNode }) {
     setFastPacket(null)
     setSlowPacket(null)
     setRssi(0)
+    sessionIdRef.current = ''
+    sequenceRef.current = 0
   }, [])
 
   // ------------------------------------------------------------------
