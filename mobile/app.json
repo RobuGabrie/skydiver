@@ -70,7 +70,9 @@
       },
       "eas": {
         "projectId": "9d09443e-f926-483e-a13a-62c8ebe71afe"
-      }
+      },
+      "supabaseUrl": "https://wowmjbrcttenwbtakxse.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indvd21qYnJjdHRlbndidGFreHNlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NjM2OTEsImV4cCI6MjA5MjUzOTY5MX0.IpG_tJNBCZs4jEl78i9MhDY5-eHZS5V7XQg54xUVcGc"
     }
   }
 }

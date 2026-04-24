@@ -1,6 +1,7 @@
 "use client"
 
-import { useSimulation } from "@/hooks/use-simulation"
+import Link from "next/link"
+import { useSkydiversData } from "@/hooks/use-skydivers-data"
 import { SkydiverCard } from "@/components/dashboard/skydiver-card"
 import { AlertFeed } from "@/components/dashboard/alert-feed"
 import { StatCard } from "@/components/dashboard/stat-card"
@@ -14,15 +15,32 @@ import {
   TrendingDown, Bell, RefreshCw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAIAnalysis } from "@/hooks/use-ai-analysis"
+
+function isDetectedVital(value: number, kind: "heart" | "oxygen") {
+  if (!Number.isFinite(value)) return false
+  return value !== 0
+}
 
 export default function DashboardPage() {
-  const { skydivers, alerts, unacknowledgedAlerts, criticalAlerts, acknowledgeAlert, acknowledgeAll } = useSimulation()
+  const { skydivers, alerts, unacknowledgedAlerts, criticalAlerts, acknowledgeAlert, acknowledgeAll } = useSkydiversData()
+  const { dangers, physio, predictions } = useAIAnalysis(skydivers)
 
   const activeJumpers = skydivers.filter(s => s.status !== "landed" && s.status !== "standby")
   const alertSkydivers = skydivers.filter(s => s.status === "alert")
-  const avgOxygen = Math.round(skydivers.reduce((a, s) => a + s.oxygen, 0) / skydivers.length)
-  const avgHeartRate = Math.round(skydivers.reduce((a, s) => a + s.heartRate, 0) / skydivers.length)
-  const selectedSkydiver = skydivers.find(s => s.id === "3") || skydivers[0]
+  const detectedOxygen = skydivers.filter(s => isDetectedVital(s.oxygen, "oxygen")).map(s => s.oxygen)
+  const detectedHeartRate = skydivers.filter(s => isDetectedVital(s.heartRate, "heart")).map(s => s.heartRate)
+  const avgOxygen = detectedOxygen.length
+    ? Math.round(detectedOxygen.reduce((a, n) => a + n, 0) / detectedOxygen.length)
+    : 0
+  const avgHeartRate = detectedHeartRate.length
+    ? Math.round(detectedHeartRate.reduce((a, n) => a + n, 0) / detectedHeartRate.length)
+    : 0
+  const selectedSkydiver = skydivers.find(s => s.id === "3") ?? skydivers[0] ?? null
+
+  const criticalDangers = dangers.filter(d => d.severity === "critical" && d.confidence > 0)
+  const criticalPredictions = predictions.filter(p => p.severity === "critical")
+  const normalPhysio = physio.find(p => p.label === "Normal Physiology")
 
   return (
     <div className="p-6 min-h-screen">
@@ -112,37 +130,45 @@ export default function DashboardPage() {
           </div>
 
           {/* Detail chart */}
-          <Card className="bg-card border-border mt-4">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-medium">
-                  Detail View — {selectedSkydiver.name}
-                </CardTitle>
-                <Badge variant="outline" className={cn(
-                  "text-xs font-mono",
-                  selectedSkydiver.status === "alert"
-                    ? "border-red-500/50 text-red-600 dark:text-red-400"
-                    : "border-primary/50 text-primary"
-                )}>
-                  {selectedSkydiver.status.replace("_", " ").toUpperCase()}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="pb-4">
-              <Tabs defaultValue="vitals">
-                <TabsList className="bg-muted/50">
-                  <TabsTrigger value="vitals" className="text-sm">Vitals</TabsTrigger>
-                  <TabsTrigger value="altitude" className="text-sm">Altitude</TabsTrigger>
-                </TabsList>
-                <TabsContent value="vitals" className="mt-4">
-                  <VitalsChart data={selectedSkydiver.vitalHistory} />
-                </TabsContent>
-                <TabsContent value="altitude" className="mt-4">
-                  <AltitudeChart data={selectedSkydiver.altitudeHistory} />
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
+          {selectedSkydiver ? (
+            <Card className="bg-card border-border mt-4">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-medium">
+                    Detail View — {selectedSkydiver.name}
+                  </CardTitle>
+                  <Badge variant="outline" className={cn(
+                    "text-xs font-mono",
+                    selectedSkydiver.status === "alert"
+                      ? "border-red-500/50 text-red-600 dark:text-red-400"
+                      : "border-primary/50 text-primary"
+                  )}>
+                    {selectedSkydiver.status.replace("_", " ").toUpperCase()}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="pb-4">
+                <Tabs defaultValue="vitals">
+                  <TabsList className="bg-muted/50">
+                    <TabsTrigger value="vitals" className="text-sm">Vitals</TabsTrigger>
+                    <TabsTrigger value="altitude" className="text-sm">Altitude</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="vitals" className="mt-4">
+                    <VitalsChart data={selectedSkydiver.vitalHistory} />
+                  </TabsContent>
+                  <TabsContent value="altitude" className="mt-4">
+                    <AltitudeChart data={selectedSkydiver.altitudeHistory} />
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="bg-card border-border mt-4">
+              <CardContent className="py-12 text-center text-muted-foreground text-sm">
+                No active skydivers — connect a device to see live data.
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right: alerts + AI summary */}
@@ -154,11 +180,16 @@ export default function DashboardPage() {
                   <Bell className="w-4 h-4" />
                   Alert Feed
                 </CardTitle>
-                {unacknowledgedAlerts.length > 0 && (
-                  <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30 font-mono text-xs">
-                    {unacknowledgedAlerts.length} new
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  <Link href="/alerts" className="text-xs text-primary hover:text-primary/80 transition-colors">
+                    Open page
+                  </Link>
+                  {unacknowledgedAlerts.length > 0 && (
+                    <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30 font-mono text-xs">
+                      {unacknowledgedAlerts.length} new
+                    </Badge>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="pb-4">
@@ -179,28 +210,37 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pb-4 space-y-3">
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-red-700 dark:text-red-400">High Risk — Mihai Popescu</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">Excessive rotation detected. Physiological stress above threshold. Immediate intervention recommended.</p>
+              {criticalDangers.map(d => (
+                <div key={d.label + d.skydiver} className="flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-700 dark:text-red-400">{d.label} — {d.skydiver}</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{d.detail}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <TrendingDown className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">Predicted Risk — Alex Mercer</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">Parachute deployment altitude approaching minimum threshold. No deployment detected at 3,200m.</p>
+              ))}
+              {criticalPredictions.map(p => (
+                <div key={p.label} className="flex items-start gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <TrendingDown className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">{p.label}</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{p.desc} — {p.action}.</p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <Shield className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">3 Skydivers — Normal</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">Sara, Elena, and Andrei all within safe parameters. No anomalies detected.</p>
+              ))}
+              {normalPhysio && (
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                  <Shield className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">{normalPhysio.skydiver} — Normal</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{normalPhysio.detail}</p>
+                  </div>
                 </div>
-              </div>
-              <p className="text-xs text-muted-foreground text-right font-mono">AI analyzed · just now</p>
+              )}
+              {criticalDangers.length === 0 && criticalPredictions.length === 0 && !normalPhysio && (
+                <p className="text-xs text-muted-foreground text-center py-2">No active skydivers — connect a device to see AI analysis.</p>
+              )}
+              <p className="text-xs text-muted-foreground text-right font-mono">AI analyzed · live</p>
             </CardContent>
           </Card>
         </div>

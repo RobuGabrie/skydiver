@@ -1,0 +1,7 @@
+{
+  "name": "skydiver-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

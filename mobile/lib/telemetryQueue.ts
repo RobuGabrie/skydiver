@@ -135,15 +135,38 @@ export async function enqueueTelemetryEvent(event: SlowTelemetryEvent | AlertTel
 	return (await getRowById(queueItem.id)) ?? queueItem
 }
 
-export async function getPendingTelemetryEvents(limit = 100) {
+export async function getPendingTelemetryEvents(
+	limit = 100,
+	maxAttempts = 5,
+	sessionId?: string,
+) {
 	const database = await getDatabase()
+
+	if (sessionId) {
+		const sessionRows = await database.getAllAsync<TelemetryQueueRow>(
+			`SELECT *
+			 FROM telemetry_queue
+			 WHERE sync_status IN ('pending', 'failed')
+				 AND attempts < ?
+				 AND session_id = ?
+			 ORDER BY created_at ASC
+			 LIMIT ?`,
+			[maxAttempts, sessionId, limit],
+		)
+
+		if (sessionRows.length > 0) {
+			return sessionRows.map(mapRowToQueueItem)
+		}
+	}
+
 	const rows = await database.getAllAsync<TelemetryQueueRow>(
 		`SELECT *
 		 FROM telemetry_queue
 		 WHERE sync_status IN ('pending', 'failed')
+			 AND attempts < ?
 		 ORDER BY created_at ASC
 		 LIMIT ?`,
-		[limit],
+		[maxAttempts, limit],
 	)
 
 	return rows.map(mapRowToQueueItem)

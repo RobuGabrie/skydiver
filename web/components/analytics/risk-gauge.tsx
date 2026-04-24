@@ -1,7 +1,6 @@
 "use client"
 
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts"
-import { cn } from "@/lib/utils"
 
 const RISK_COLORS = {
   low: "#22c55e",
@@ -44,7 +43,7 @@ export function RiskGauge({ score, label }: { score: number; label?: string }) {
               stroke="none"
             >
               <Cell fill={color} />
-              <Cell fill="rgba(255,255,255,0.05)" />
+              <Cell fill="var(--muted)" />
             </Pie>
           </PieChart>
         </ResponsiveContainer>

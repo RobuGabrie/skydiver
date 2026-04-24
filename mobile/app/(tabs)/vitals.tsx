@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons'
 import { MotiView, AnimatePresence } from 'moti'
 import { useBle } from '../../lib/BleContext'
 import { useTheme } from '../../lib/ThemeContext'
-import { StatusRing } from '../../components/StatusRing'
 import { SparkLine } from '../../components/SparkLine'
 import { Progress } from '~/components/ui/progress'
 import { AppColors, Typography, Spacing, Radius, TouchTarget } from '../../lib/theme'
@@ -17,7 +16,7 @@ function pushPoint(arr: VitalPoint[], value: number): VitalPoint[] {
   return [...arr.slice(-(MAX_HIST - 1)), { time: Date.now(), value }]
 }
 
-interface VitalRowProps {
+interface VitalCardProps {
   label: string
   value: number
   unit: string
@@ -27,13 +26,14 @@ interface VitalRowProps {
   warning: boolean
   description: string
   history: VitalPoint[]
+  icon: React.ComponentProps<typeof Ionicons>['name']
   colors: AppColors
   index: number
 }
 
-function VitalRow({
-  label, value, unit, color, min, max, warning, description, history, colors, index,
-}: VitalRowProps) {
+function VitalCard({
+  label, value, unit, color, min, max, warning, description, history, icon, colors, index,
+}: VitalCardProps) {
   const [expanded, setExpanded] = useState(false)
   const styles = useMemo(() => makeStyles(colors), [colors])
   const pct = Math.round(((value - min) / (max - min)) * 100)
@@ -41,63 +41,57 @@ function VitalRow({
 
   return (
     <MotiView
-      from={{ opacity: 0, translateY: 14 }}
+      from={{ opacity: 0, translateY: 12 }}
       animate={{ opacity: 1, translateY: 0 }}
-      transition={{ type: 'spring', damping: 20, stiffness: 110, delay: index * 70 }}
+      transition={{ type: 'spring', damping: 20, stiffness: 110, delay: index * 60 }}
     >
       <Pressable
         onPress={() => setExpanded(e => !e)}
         style={[
-          styles.vitalRow,
+          styles.vitalCard,
           warning
-            ? { borderColor: colors.danger + '55', backgroundColor: colors.dangerDim }
-            : { borderColor: accentColor + '28' },
+            ? { borderColor: colors.danger + '50', backgroundColor: colors.dangerDim }
+            : { borderColor: colors.border },
         ]}
         accessibilityRole="button"
         accessibilityLabel={`${label}: ${value} ${unit}`}
       >
-        <View style={[styles.rowAccent, { backgroundColor: accentColor }]} />
+        {/* Top row: icon box + value + sparkline */}
+        <View style={styles.topRow}>
+          <View style={[styles.iconBox, { backgroundColor: accentColor + '18' }]}>
+            <Ionicons name={icon} size={15} color={accentColor} />
+          </View>
 
-        <View style={styles.vitalTop}>
-          <View style={styles.vitalLeft}>
+          <View style={styles.centerCol}>
             <Text style={[styles.vitalLabel, { color: warning ? colors.danger : colors.textMuted }]}>
               {label}
             </Text>
-            <View style={styles.vitalValRow}>
-              <Text style={[styles.vitalValue, { color: accentColor }]}>
-                {value}
-              </Text>
-              <Text style={[styles.vitalUnit, { color: accentColor + '70' }]}>
-                {unit}
-              </Text>
+            <View style={styles.valueRow}>
+              <Text style={[styles.vitalValue, { color: accentColor }]}>{value}</Text>
+              <Text style={[styles.vitalUnit, { color: accentColor + '80' }]}>{unit}</Text>
               {warning && (
-                <View style={styles.warningBadge}>
-                  <Ionicons name="warning" size={10} color={colors.danger} />
-                  <Text style={styles.warningText}>Alert</Text>
+                <View style={styles.alertBadge}>
+                  <Ionicons name="warning" size={9} color={colors.danger} />
+                  <Text style={styles.alertText}>Alert</Text>
                 </View>
               )}
             </View>
             <Progress
               value={Math.min(100, Math.max(0, pct))}
-              className="h-1"
+              className="h-0.5 mt-1"
               indicatorClassName={warning ? 'bg-destructive' : undefined}
             />
           </View>
 
-          <View style={styles.vitalRight}>
-            <MotiView
-              from={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ type: 'timing', duration: 400, delay: index * 70 + 200 }}
-            >
-              <SparkLine data={history} color={accentColor} width={72} height={32} />
-            </MotiView>
+          <View style={styles.rightCol}>
+            {history.length >= 2 && (
+              <SparkLine data={history} color={accentColor} width={70} height={30} />
+            )}
             <MotiView
               animate={{ rotate: expanded ? '180deg' : '0deg' }}
               transition={{ type: 'spring', damping: 16, stiffness: 200 }}
-              style={styles.chevron}
             >
-              <Ionicons name="chevron-down" size={13} color={colors.textMuted} />
+              <Ionicons name="chevron-down" size={12} color={colors.textMuted} />
             </MotiView>
           </View>
         </View>
@@ -105,20 +99,18 @@ function VitalRow({
         <AnimatePresence>
           {expanded && (
             <MotiView
-              key="expanded"
+              key="detail"
               from={{ opacity: 0, translateY: -6 }}
               animate={{ opacity: 1, translateY: 0 }}
               exit={{ opacity: 0, translateY: -6 }}
-              transition={{ type: 'timing', duration: 200 }}
+              transition={{ type: 'timing', duration: 180 }}
               style={styles.expandedSection}
             >
               <Text style={styles.expandedDesc}>{description}</Text>
               <View style={styles.rangeRow}>
-                <Text style={styles.rangeText}>Min: {min} {unit}</Text>
-                <Text style={[styles.rangeText, { color: accentColor }]}>
-                  Now: {value} {unit}
-                </Text>
-                <Text style={styles.rangeText}>Max: {max} {unit}</Text>
+                <Text style={styles.rangeText}>Min {min} {unit}</Text>
+                <Text style={[styles.rangeText, { color: accentColor }]}>Now {value} {unit}</Text>
+                <Text style={styles.rangeText}>Max {max} {unit}</Text>
               </View>
             </MotiView>
           )}
@@ -154,21 +146,15 @@ export default function VitalsScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.content}>
+          <Text style={styles.pageTitle}>Biometrics</Text>
+          <Text style={styles.pageSubtitle}>Live physiological monitoring</Text>
           <MotiView
-            from={{ opacity: 0, translateY: -6 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: 'timing', duration: 260 }}
-          >
-            <Text style={styles.pageTitle}>Biometrics</Text>
-            <Text style={styles.pageSubtitle}>Live physiological monitoring</Text>
-          </MotiView>
-          <MotiView
-            from={{ opacity: 0, scale: 0.92 }}
+            from={{ opacity: 0, scale: 0.94 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ type: 'spring', damping: 16, stiffness: 100, delay: 100 }}
+            transition={{ type: 'spring', damping: 16, stiffness: 100, delay: 80 }}
             style={styles.emptyState}
           >
-            <Ionicons name="heart-dislike-outline" size={40} color={colors.textMuted} />
+            <Ionicons name="heart-dislike-outline" size={36} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>No device connected</Text>
             <Text style={styles.emptyBody}>
               Connect a SkyWatch wearable on the Connect tab to see real-time biometric data.
@@ -179,7 +165,35 @@ export default function VitalsScreen() {
     )
   }
 
-  const vitals: Omit<VitalRowProps, 'colors' | 'index'>[] = [
+  // Summary stats for header row
+  const summaryItems = [
+    {
+      label: 'SpO₂',
+      value: `${Math.round(slowPacket.spo2)}%`,
+      color: slowPacket.spo2 < 93 ? colors.danger : colors.oxygen,
+      warn: slowPacket.spo2 < 93,
+    },
+    {
+      label: 'HR',
+      value: `${Math.round(slowPacket.bpm)}`,
+      color: slowPacket.bpm > 160 ? colors.danger : colors.heartRate,
+      warn: slowPacket.bpm > 160,
+    },
+    {
+      label: 'Stress',
+      value: `${Math.round(slowPacket.stressPct)}%`,
+      color: slowPacket.stressPct > 80 ? colors.danger : colors.stress,
+      warn: slowPacket.stressPct > 80,
+    },
+    {
+      label: 'Battery',
+      value: `${Math.round(slowPacket.battPct)}%`,
+      color: slowPacket.battPct < 20 ? colors.danger : colors.battery,
+      warn: slowPacket.battPct < 20,
+    },
+  ]
+
+  const vitals: Omit<VitalCardProps, 'colors' | 'index'>[] = [
     {
       label: 'Heart Rate',
       value: Math.round(slowPacket.bpm),
@@ -187,8 +201,8 @@ export default function VitalsScreen() {
       color: colors.heartRate,
       min: 40, max: 200,
       warning: slowPacket.bpm > 160,
-      description:
-        'Heart beats per minute. Safe range during freefall: 60–160 bpm. Elevated rate may indicate physical stress.',
+      icon: 'heart-outline',
+      description: 'Heart beats per minute. Safe range during freefall: 60–160 bpm. Elevated rate may indicate physical stress.',
       history: hrHist.current,
     },
     {
@@ -198,8 +212,8 @@ export default function VitalsScreen() {
       color: colors.oxygen,
       min: 85, max: 100,
       warning: slowPacket.spo2 < 93,
-      description:
-        'Oxygen saturation in blood. Below 93% is concerning at altitude — hypoxia can impair decision-making. Normal: 95–100%.',
+      icon: 'water-outline',
+      description: 'Oxygen saturation in blood. Below 93% is concerning at altitude — hypoxia can impair decision-making.',
       history: o2Hist.current,
     },
     {
@@ -209,8 +223,8 @@ export default function VitalsScreen() {
       color: colors.stress,
       min: 0, max: 100,
       warning: slowPacket.stressPct > 80,
-      description:
-        'Derived stress index from HRV and motion. Above 80% indicates possible panic response or loss of control.',
+      icon: 'pulse-outline',
+      description: 'Derived from HRV and motion. Above 80% indicates possible panic response or loss of control.',
       history: stressHist.current,
     },
     {
@@ -220,8 +234,8 @@ export default function VitalsScreen() {
       color: colors.temperature,
       min: 35, max: 40,
       warning: slowPacket.tempC > 37.5,
-      description:
-        'Skin temperature from wrist sensor. Hypothermia risk at altitude. Normal: 36.1–37.2°C.',
+      icon: 'thermometer-outline',
+      description: 'Skin temperature from wrist sensor. Hypothermia risk at altitude. Normal: 36.1–37.2°C.',
       history: tempHist.current,
     },
   ]
@@ -233,73 +247,38 @@ export default function VitalsScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <MotiView
-          from={{ opacity: 0, translateY: -6 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: 'timing', duration: 260 }}
-        >
-          <Text style={styles.pageTitle}>Biometrics</Text>
-          <Text style={styles.pageSubtitle}>Live physiological monitoring</Text>
-        </MotiView>
+        <Text style={styles.pageTitle}>Biometrics</Text>
+        <Text style={styles.pageSubtitle}>Live physiological monitoring</Text>
 
-        {/* Status rings */}
+        {/* Summary strip */}
         <MotiView
-          from={{ opacity: 0, translateY: 14 }}
+          from={{ opacity: 0, translateY: 10 }}
           animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: 'spring', damping: 18, stiffness: 100, delay: 60 }}
-          style={styles.ringsCard}
+          transition={{ type: 'spring', damping: 18, stiffness: 110, delay: 40 }}
+          style={styles.summaryCard}
         >
-          {[
-            {
-              value: slowPacket.spo2,
-              color: slowPacket.spo2 < 93 ? colors.danger : colors.oxygen,
-              label: 'SpO₂',
-              display: `${Math.round(slowPacket.spo2)}%`,
-              delay: 80,
-            },
-            {
-              value: slowPacket.stressPct,
-              color: slowPacket.stressPct > 80 ? colors.danger : colors.stress,
-              label: 'Stress',
-              display: `${Math.round(slowPacket.stressPct)}%`,
-              delay: 140,
-            },
-            {
-              value: slowPacket.battPct,
-              color: slowPacket.battPct < 20 ? colors.danger : colors.battery,
-              label: 'Battery',
-              display: `${Math.round(slowPacket.battPct)}%`,
-              delay: 200,
-            },
-          ].map((ring, i) => (
-            <React.Fragment key={ring.label}>
-              {i > 0 && <View style={styles.ringDivider} />}
-              <MotiView
-                from={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ type: 'spring', damping: 14, stiffness: 120, delay: ring.delay }}
-                style={styles.ringItem}
-              >
-                <StatusRing value={ring.value} size={88} color={ring.color} />
-                <Text style={styles.ringLabel}>{ring.label}</Text>
-                <Text style={[styles.ringValue, { color: ring.color }]}>{ring.display}</Text>
-              </MotiView>
+          {summaryItems.map((item, i) => (
+            <React.Fragment key={item.label}>
+              {i > 0 && <View style={styles.summaryDivider} />}
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>{item.label}</Text>
+                <Text style={[styles.summaryValue, { color: item.color }]}>{item.value}</Text>
+                {item.warn && (
+                  <Ionicons name="warning" size={9} color={colors.danger} style={{ marginTop: 2 }} />
+                )}
+              </View>
             </React.Fragment>
           ))}
         </MotiView>
 
-        <MotiView
-          from={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ type: 'timing', duration: 240, delay: 200 }}
-        >
+        <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Detail View</Text>
-          <Text style={styles.sectionHint}>Tap a row to expand</Text>
-        </MotiView>
+          <Text style={styles.sectionHint}>Tap to expand</Text>
+        </View>
 
-        <View style={styles.vitalsList}>
+        <View style={styles.list}>
           {vitals.map((v, i) => (
-            <VitalRow key={v.label} {...v} colors={colors} index={i} />
+            <VitalCard key={v.label} {...v} colors={colors} index={i} />
           ))}
         </View>
 
@@ -320,7 +299,6 @@ function makeStyles(colors: AppColors) {
       fontWeight: Typography.bold,
       color: colors.textPrimary,
       marginBottom: 2,
-      letterSpacing: 0.5,
     },
     pageSubtitle: {
       fontSize: Typography.sm,
@@ -346,105 +324,127 @@ function makeStyles(colors: AppColors) {
       maxWidth: 280,
     },
 
-    ringsCard: {
+    summaryCard: {
       flexDirection: 'row',
-      alignItems: 'center',
       backgroundColor: colors.surfaceRaised,
-      borderRadius: Radius.lg,
+      borderRadius: Radius.md,
       borderWidth: 1,
-      borderColor: colors.primary + '25',
-      paddingVertical: Spacing.lg,
+      borderColor: colors.border,
+      paddingVertical: Spacing.md,
       paddingHorizontal: Spacing.sm,
       marginBottom: Spacing.lg,
     },
-    ringItem: { flex: 1, alignItems: 'center', gap: Spacing.xs },
-    ringDivider: { width: 1, height: 60, backgroundColor: colors.border },
-    ringLabel: {
+    summaryItem: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 3,
+    },
+    summaryDivider: {
+      width: 1,
+      backgroundColor: colors.border,
+    },
+    summaryLabel: {
       fontSize: Typography.xs,
       color: colors.textMuted,
       textTransform: 'uppercase',
-      letterSpacing: 1,
+      letterSpacing: 0.8,
     },
-    ringValue: {
+    summaryValue: {
       fontSize: Typography.md,
       fontWeight: Typography.bold,
       fontFamily: Typography.mono,
     },
 
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: Spacing.sm,
+    },
     sectionTitle: {
       fontSize: Typography.xs,
       fontWeight: Typography.semibold,
       color: colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 1.2,
-      marginBottom: 2,
     },
     sectionHint: {
       fontSize: Typography.xs,
       color: colors.textMuted,
-      marginBottom: Spacing.md,
     },
 
-    vitalsList: { gap: Spacing.sm },
+    list: { gap: Spacing.sm },
 
-    vitalRow: {
+    vitalCard: {
       backgroundColor: colors.surfaceRaised,
       borderRadius: Radius.md,
       borderWidth: 1,
       padding: Spacing.md,
       minHeight: TouchTarget,
-      overflow: 'hidden',
     },
-    rowAccent: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      height: 2,
+    topRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: Spacing.sm,
     },
-    vitalTop: { flexDirection: 'row', gap: Spacing.md, paddingTop: 4 },
-    vitalLeft: { flex: 1 },
-    vitalRight: { alignItems: 'flex-end', justifyContent: 'space-between' },
+    iconBox: {
+      width: 32,
+      height: 32,
+      borderRadius: Radius.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    centerCol: { flex: 1 },
+    rightCol: {
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      gap: Spacing.sm,
+      flexShrink: 0,
+    },
 
     vitalLabel: {
       fontSize: Typography.xs,
       textTransform: 'uppercase',
-      letterSpacing: 1,
+      letterSpacing: 0.8,
       fontWeight: Typography.medium,
-      marginBottom: 4,
+      marginBottom: 3,
     },
-    vitalValRow: {
+    valueRow: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      gap: 4,
-      marginBottom: Spacing.sm,
+      gap: 3,
+      marginBottom: 4,
     },
     vitalValue: {
       fontSize: Typography.xl,
       fontWeight: Typography.bold,
       fontFamily: Typography.mono,
       fontVariant: ['tabular-nums'],
+      lineHeight: Typography.xl * 1.1,
     },
-    vitalUnit: { fontSize: Typography.sm, marginBottom: 3, fontWeight: Typography.medium },
+    vitalUnit: {
+      fontSize: Typography.sm,
+      marginBottom: 3,
+      fontWeight: Typography.medium,
+    },
 
-    warningBadge: {
+    alertBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 3,
+      gap: 2,
       backgroundColor: colors.dangerDim,
-      paddingHorizontal: 6,
+      paddingHorizontal: 5,
       paddingVertical: 2,
       borderRadius: Radius.full,
       marginBottom: 3,
-      marginLeft: 4,
+      marginLeft: 2,
     },
-    warningText: {
-      fontSize: Typography.xs,
+    alertText: {
+      fontSize: 9,
       color: colors.danger,
       fontWeight: Typography.semibold,
     },
-
-    chevron: { marginTop: Spacing.xs },
 
     expandedSection: {
       marginTop: Spacing.md,

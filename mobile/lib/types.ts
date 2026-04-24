@@ -91,9 +91,12 @@ export interface SlowTelemetryData {
   gyroY?: number
   gyroZ?: number
   stationary?: number
+  // Firmware-derived canopy motion signal (bit 5 of SlowPacket flags)
+  canopyMotion?: number  // 1 = low gyro + not stationary (on-device canopy estimate)
 }
 
 export interface AlertData {
+  alertType?: string
   message: string
   severity: 'info' | 'warning' | 'danger'
   heartRate?: number

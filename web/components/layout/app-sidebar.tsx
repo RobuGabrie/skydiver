@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Users, BarChart3, Bell,
-  Wifi, Settings, ChevronLeft, ChevronRight, Wind,
+  ChevronLeft, ChevronRight, Wind, FlaskConical,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -12,17 +12,19 @@ import { Separator } from "@/components/ui/separator"
 import { useState } from "react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ThemeToggle } from "./theme-toggle"
+import { useMockMode } from "@/lib/mock-context"
 
 const navItems = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard", badge: null },
   { href: "/skydivers", icon: Users, label: "Skydivers", badge: null },
   { href: "/analytics", icon: BarChart3, label: "AI Analytics", badge: null },
-  { href: "/alerts", icon: Bell, label: "Alerts", badge: 3 },
+  { href: "/alerts", icon: Bell, label: "Alerts", badge: null },
 ]
 
 export function AppSidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const { isMockMode, toggleMockMode } = useMockMode()
 
   return (
     <aside className={cn(
@@ -41,23 +43,6 @@ export function AppSidebar() {
           </div>
         )}
       </div>
-
-      {/* Live status */}
-      {!collapsed && (
-        <div className="px-4 py-3 border-b border-sidebar-border">
-          <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-            </span>
-            Live — 5 skydivers
-          </div>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-            <Wifi className="w-3 h-3" />
-            <span>Connected · WiFi + BLE</span>
-          </div>
-        </div>
-      )}
 
       {/* Nav */}
       <nav className="flex-1 px-2 py-3 space-y-1">
@@ -100,6 +85,45 @@ export function AppSidebar() {
 
       {/* Bottom */}
       <div className="px-2 py-3 space-y-1">
+        {/* Mock mode toggle */}
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger render={
+              <button
+                aria-label="Toggle mock data"
+                onClick={toggleMockMode}
+                className={cn(
+                  "flex items-center justify-center w-full py-2.5 rounded-lg transition-colors cursor-pointer",
+                  isMockMode
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25"
+                    : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+                )}
+              >
+                <FlaskConical className="w-4 h-4" />
+              </button>
+            } />
+            <TooltipContent side="right">{isMockMode ? "Disable mock data" : "Enable mock data"}</TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            onClick={toggleMockMode}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors w-full cursor-pointer",
+              isMockMode
+                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/25"
+                : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            )}
+          >
+            <FlaskConical className="w-4 h-4 shrink-0" />
+            <span className="flex-1 text-left">Mock Data</span>
+            {isMockMode && (
+              <Badge className="h-5 px-1.5 text-xs bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/40">
+                ON
+              </Badge>
+            )}
+          </button>
+        )}
+
         {/* Theme toggle */}
         {collapsed ? (
           <Tooltip>
@@ -110,26 +134,6 @@ export function AppSidebar() {
           </Tooltip>
         ) : (
           <ThemeToggle />
-        )}
-
-        {/* Settings */}
-        {collapsed ? (
-          <Tooltip>
-            <TooltipTrigger render={
-              <button
-                aria-label="Settings"
-                className="flex items-center justify-center w-full py-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
-            } />
-            <TooltipContent side="right">Settings</TooltipContent>
-          </Tooltip>
-        ) : (
-          <button className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors w-full cursor-pointer">
-            <Settings className="w-4 h-4 shrink-0" />
-            <span>Settings</span>
-          </button>
         )}
 
         {/* Collapse */}

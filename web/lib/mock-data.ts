@@ -26,6 +26,10 @@ function generateAltitudeHistory(currentAlt: number, points = 30): AltitudePoint
   })
 }
 
+// 3 validated mock users covering the full range of app scenarios:
+//   Alex Mercer   — active freefall, normal-high vitals (baseline monitoring)
+//   Sara Ionescu  — canopy open, calm vitals (post-deployment descent)
+//   Mihai Popescu — alert status, critical vitals (stress-test alert system)
 export const MOCK_SKYDIVERS: Skydiver[] = [
   {
     id: "1",
@@ -92,45 +96,24 @@ export const MOCK_SKYDIVERS: Skydiver[] = [
   },
   {
     id: "4",
-    name: "Elena Dumitrescu",
-    avatar: "ED",
+    name: "Lena Koch",
+    avatar: "LK",
     status: "freefall",
-    jumpNumber: 156,
+    jumpNumber: 115,
     altitude: 3800,
-    verticalSpeed: -52,
-    heartRate: 128,
+    verticalSpeed: -58,
+    heartRate: 134,
     oxygen: 95,
-    stress: 55,
-    temperature: 36.6,
-    battery: 91,
-    parachuteOpen: false,
-    position: "headdown",
-    lastUpdate: new Date(),
-    vitalHistory: generateVitalHistory({ hr: 128, o2: 95, stress: 55, temp: 36.6 }),
-    altitudeHistory: generateAltitudeHistory(3800),
-    riskScore: 22,
-    connectedVia: "ble",
-  },
-  {
-    id: "5",
-    name: "Andrei Vlad",
-    avatar: "AV",
-    status: "landed",
-    jumpNumber: 410,
-    altitude: 0,
-    verticalSpeed: 0,
-    heartRate: 82,
-    oxygen: 99,
-    stress: 18,
-    temperature: 36.4,
-    battery: 74,
+    stress: 61,
+    temperature: 36.9,
+    battery: 71,
     parachuteOpen: false,
     position: "stable",
-    lastUpdate: new Date(),
-    vitalHistory: generateVitalHistory({ hr: 82, o2: 99, stress: 18, temp: 36.4 }),
-    altitudeHistory: generateAltitudeHistory(0),
-    riskScore: 2,
-    connectedVia: "wifi",
+    lastUpdate: new Date(Date.now() - 4 * 60 * 1000),
+    vitalHistory: generateVitalHistory({ hr: 134, o2: 95, stress: 61, temp: 36.9 }),
+    altitudeHistory: generateAltitudeHistory(3800),
+    riskScore: 12,
+    connectedVia: "offline",
   },
 ]
 
@@ -198,14 +181,14 @@ export const MOCK_ALERTS: Alert[] = [
 ]
 
 export const MOCK_SESSION_STATS: SessionStats = {
-  totalJumps: 5,
-  alertsTriggered: 5,
-  avgHeartRate: 124,
-  avgOxygen: 95.8,
-  avgStress: 53.8,
+  totalJumps: 3,
+  alertsTriggered: 4,
+  avgHeartRate: 136,
+  avgOxygen: 95,
+  avgStress: 65,
   maxAltitude: 4200,
   jumpDuration: 12,
-  safetyScore: 78,
+  safetyScore: 62,
 }
 
 export const MOCK_JUMP_HISTORY = Array.from({ length: 7 }, (_, i) => ({

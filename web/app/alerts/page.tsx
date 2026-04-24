@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useSimulation } from "@/hooks/use-simulation"
+import { useSkydiversData } from "@/hooks/use-skydivers-data"
 import { Alert, AlertSeverity } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -114,7 +114,7 @@ function AlertRow({ alert, onAck }: { alert: Alert; onAck: (id: string) => void 
 }
 
 export default function AlertsPage() {
-  const { alerts, unacknowledgedAlerts, criticalAlerts, acknowledgeAlert, acknowledgeAll } = useSimulation()
+  const { alerts, unacknowledgedAlerts, criticalAlerts, acknowledgeAlert, acknowledgeAll } = useSkydiversData()
   const [filter, setFilter] = useState<"all" | AlertSeverity>("all")
 
   const filtered = filter === "all" ? alerts : alerts.filter(a => a.severity === filter)
@@ -167,7 +167,7 @@ export default function AlertsPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Alert list */}
-        <div className="xl:col-span-2 space-y-3">
+        <div className="xl:col-span-2 space-y-4">
           {/* Filter tabs */}
           <div className="flex gap-2 mb-4">
             {(["all", "critical", "warning", "info"] as const).map(f => (
@@ -195,9 +195,11 @@ export default function AlertsPage() {
               <p className="text-base">No alerts in this category</p>
             </div>
           ) : (
-            filtered.map(alert => (
-              <AlertRow key={alert.id} alert={alert} onAck={acknowledgeAlert} />
-            ))
+            <div className="overflow-y-auto max-h-[calc(100vh-22rem)] pr-1 space-y-3">
+              {filtered.map(alert => (
+                <AlertRow key={alert.id} alert={alert} onAck={acknowledgeAlert} />
+              ))}
+            </div>
           )}
         </div>
 

@@ -1,0 +1,15 @@
+export type AlertSeverityDB = 'critical' | 'warning' | 'info'
+
+export type AlertType =
+  | 'uncontrolled_fall'
+  | 'excessive_rotation'
+  | 'no_movement'
+  | 'abnormal_pulse'
+  | 'high_stress'
+  | 'low_oxygen'
+  | 'high_temp'
+  | 'low_battery'
+  | 'parachute_open'
+  | 'position_change'
+  | 'accident_risk'
+  | 'abnormal_behavior'

@@ -32,34 +32,36 @@ export interface FastPacket {
 }
 
 export interface SlowPacket {
-  uptimeMs:   number   // ms
-  rtcYear:    number
-  rtcMonth:   number
-  rtcDay:     number
-  rtcHour:    number
-  rtcMinute:  number
-  rtcSecond:  number
-  tempC:      number   // °C
-  voltageV:   number   // V
-  currentMA:  number   // mA
-  battPct:    number   // 0–100
-  cpuPct:     number   // 0–100
-  bpm:        number   // beats/min
-  spo2:       number   // 0–100
-  stressPct:  number   // 0–100
-  flags:      number
-  seq:        number
+  uptimeMs:     number   // ms
+  rtcYear:      number
+  rtcMonth:     number
+  rtcDay:       number
+  rtcHour:      number
+  rtcMinute:    number
+  rtcSecond:    number
+  tempC:        number   // °C
+  voltageV:     number   // V
+  currentMA:    number   // mA
+  battPct:      number   // 0–100
+  cpuPct:       number   // 0–100
+  bpm:          number   // beats/min
+  spo2:         number   // 0–100
+  stressPct:    number   // 0–100
+  flags:        number
+  seq:          number
+  // Decoded from flags
+  canopyMotion: number   // 0 | 1 — firmware-derived canopy estimate (bit 5)
 }
 
 // Bits in SlowPacket.flags (from buildSlowFlags in ble_manager.cpp)
-export const FLAG_THERM_VALID = 0x01
-export const FLAG_GYRO_ACTIVE = 0x02
-export const FLAG_CURRENT_MOD = 0x04
-export const FLAG_CPU_MOD     = 0x08
-export const FLAG_STATIONARY  = 0x10
-export const FLAG_BLE_CONN    = 0x20
-export const FLAG_PULSE_MOD   = 0x40
-export const FLAG_PULSE_VALID = 0x80
+export const FLAG_THERM_VALID    = 0x01
+export const FLAG_GYRO_ACTIVE    = 0x02
+export const FLAG_CURRENT_MOD   = 0x04
+export const FLAG_CPU_MOD        = 0x08
+export const FLAG_STATIONARY     = 0x10
+export const FLAG_CANOPY_MOTION  = 0x20  // low gyro + not stationary (was: BLE connected — redundant)
+export const FLAG_PULSE_MOD      = 0x40
+export const FLAG_PULSE_VALID    = 0x80
 
 // ------------------------------------------------------------------
 // Binary layout — assumes __attribute__((packed)) on the ESP structs.
@@ -115,8 +117,9 @@ export function parseSlowPacket(bytes: Uint8Array): SlowPacket | null {
     bpm:        dv.getUint16(21, LE) / 10,
     spo2:       dv.getUint16(23, LE) / 10,
     stressPct:  dv.getUint16(25, LE) / 10,
-    flags:      dv.getUint8 (27),
-    seq:        dv.getUint8 (28),
+    flags:        dv.getUint8 (27),
+    seq:          dv.getUint8 (28),
+    canopyMotion: (dv.getUint8(27) >> 5) & 1,
   }
 }
 

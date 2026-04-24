@@ -8,7 +8,9 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
-import { MotiView, AnimatePresence } from 'moti'
+import { LinearGradient } from 'expo-linear-gradient'
+import { MotiView } from 'moti'
+import Svg, { Circle, Line } from 'react-native-svg'
 import { useBle } from '../../lib/BleContext'
 import { useConnectivity } from '../../hooks/useConnectivity'
 import { useTheme } from '../../lib/ThemeContext'
@@ -16,11 +18,10 @@ import { usePhoneLocation } from '../../hooks/usePhoneLocation'
 import { ConnectionBadge } from '../../components/ConnectionBadge'
 import { MetricCard } from '../../components/MetricCard'
 import { SparkLine } from '../../components/SparkLine'
-import { Badge } from '~/components/ui/badge'
-import { Text as UIText } from '~/components/ui/text'
 import { Progress } from '~/components/ui/progress'
 import { AppColors, Typography, Spacing, Radius } from '../../lib/theme'
 import { formatDuration } from '../../lib/timeUtils'
+import type { FastPacket } from '../../lib/bleProtocol'
 import type { VitalPoint, SkydiverStatus } from '../../lib/types'
 
 const MAX_HIST = 40
@@ -43,23 +44,400 @@ function deriveStatus(
   return 'standby'
 }
 
-type BadgeVariant = 'default' | 'success' | 'secondary' | 'destructive'
+const STATUS_CFG: Record<SkydiverStatus, { label: string; color: string; pulse: boolean }> = {
+  freefall:    { label: 'FREEFALL',    color: '#38BDF8', pulse: true },
+  canopy_open: { label: 'CANOPY OPEN', color: '#22C55E', pulse: true },
+  landed:      { label: 'LANDED',      color: '#64748B', pulse: false },
+  standby:     { label: 'STANDBY',     color: '#64748B', pulse: false },
+  alert:       { label: 'ALERT',       color: '#EF4444', pulse: true },
+}
 
-const STATUS_CFG: Record<SkydiverStatus, { label: string; color: string; variant: BadgeVariant; pulse: boolean }> = {
-  freefall:    { label: 'FREEFALL',    color: '#00E5FF', variant: 'default',     pulse: true },
-  canopy_open: { label: 'CANOPY OPEN', color: '#00E676', variant: 'success',     pulse: true },
-  landed:      { label: 'LANDED',      color: '#3A5A78', variant: 'secondary',   pulse: false },
-  standby:     { label: 'STANDBY',     color: '#3A5A78', variant: 'secondary',   pulse: false },
-  alert:       { label: 'ALERT',       color: '#FF3B30', variant: 'destructive', pulse: true },
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v))
+}
+
+const motionStyles = StyleSheet.create({
+  telemetryCardOuter: {
+    flex: 1,
+  },
+  telemetryCard: {
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: Spacing.md,
+    overflow: 'hidden',
+    gap: Spacing.sm,
+  },
+  telemetryTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  telemetryCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  telemetryTitle: {
+    fontSize: Typography.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+    color: '#64748B',
+    fontWeight: Typography.semibold,
+  },
+  telemetryValue: {
+    fontSize: Typography.xl,
+    lineHeight: Typography.xl * 1.05,
+    fontWeight: Typography.bold,
+    fontFamily: Typography.mono,
+    fontVariant: ['tabular-nums'],
+  },
+  telemetrySubtitle: {
+    fontSize: Typography.sm,
+    lineHeight: Typography.sm * 1.35,
+    color: '#475569',
+  },
+  telemetryRingWrap: {
+    width: 84,
+    height: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  telemetryRingLabelWrap: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  telemetryRingLabel: {
+    fontSize: 9,
+    fontWeight: Typography.bold,
+    letterSpacing: 1.1,
+  },
+  telemetryChipRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  telemetryChip: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: Radius.md,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 2,
+  },
+  telemetryChipLabel: {
+    fontSize: 9,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: '#64748B',
+    fontWeight: Typography.semibold,
+  },
+  telemetryChipValue: {
+    fontSize: Typography.sm,
+    fontFamily: Typography.mono,
+    fontWeight: Typography.semibold,
+    color: '#0F172A',
+  },
+  telemetryBarBlock: {
+    gap: 6,
+  },
+  telemetryBarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  telemetryBarLabel: {
+    fontSize: Typography.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
+    color: '#64748B',
+    fontWeight: Typography.semibold,
+  },
+  telemetryBarValue: {
+    fontSize: Typography.xs,
+    fontFamily: Typography.mono,
+    fontWeight: Typography.bold,
+  },
+  telemetryBars: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 3,
+    height: 22,
+  },
+  telemetryBar: {
+    flex: 1,
+    borderRadius: Radius.full,
+  },
+})
+
+function RingGauge({
+  value,
+  size,
+  stroke,
+  color,
+  track,
+}: {
+  value: number
+  size: number
+  stroke: number
+  color: string
+  track: string
+}) {
+  const radius = (size - stroke) / 2
+  const circumference = Math.PI * radius * 2
+  const dashOffset = circumference * (1 - clamp(value, 0, 100) / 100)
+
+  return (
+    <Svg width={size} height={size}>
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={track}
+        strokeWidth={stroke}
+        fill="none"
+      />
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={color}
+        strokeWidth={stroke}
+        fill="none"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+    </Svg>
+  )
+}
+
+function MotionCube({
+  roll,
+  pitch,
+  yaw,
+  colors,
+}: {
+  roll: number
+  pitch: number
+  yaw: number
+  colors: AppColors
+}) {
+  const width = 250
+  const height = 170
+  const cx = width / 2
+  const cy = height / 2
+  const size = 40
+  const distance = 180
+
+  const rx = clamp(pitch, -80, 80) * Math.PI / 180
+  const ry = clamp(yaw, -180, 180) * Math.PI / 180
+  const rz = clamp(roll, -180, 180) * Math.PI / 180
+
+  const vertices = [
+    [-size, -size, -size],
+    [size, -size, -size],
+    [size, size, -size],
+    [-size, size, -size],
+    [-size, -size, size],
+    [size, -size, size],
+    [size, size, size],
+    [-size, size, size],
+  ] as const
+
+  const edges: Array<[number, number]> = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7],
+  ]
+
+  function rotate([x, y, z]: readonly number[]) {
+    const cyv = Math.cos(ry)
+    const syv = Math.sin(ry)
+    const cxv = Math.cos(rx)
+    const sxv = Math.sin(rx)
+    const czv = Math.cos(rz)
+    const szv = Math.sin(rz)
+
+    const y1 = y * cxv - z * sxv
+    const z1 = y * sxv + z * cxv
+
+    const x2 = x * cyv + z1 * syv
+    const z2 = -x * syv + z1 * cyv
+
+    const x3 = x2 * czv - y1 * szv
+    const y3 = x2 * szv + y1 * czv
+
+    return { x: x3, y: y3, z: z2 }
+  }
+
+  const projected = vertices.map(v => {
+    const p = rotate(v)
+    const scale = distance / (distance - p.z)
+    return {
+      x: cx + p.x * scale,
+      y: cy + p.y * scale,
+      z: p.z,
+    }
+  })
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Svg width={width} height={height}>
+        {edges.map(([a, b], i) => {
+          const p1 = projected[a]
+          const p2 = projected[b]
+          const avgDepth = (p1.z + p2.z) / 2
+          const strokeOpacity = avgDepth > 0 ? 0.9 : 0.45
+          const stroke = avgDepth > 0 ? colors.primary : colors.textMuted
+          return (
+            <Line
+              key={`${a}-${b}-${i}`}
+              x1={p1.x}
+              y1={p1.y}
+              x2={p2.x}
+              y2={p2.y}
+              stroke={stroke}
+              strokeOpacity={strokeOpacity}
+              strokeWidth={avgDepth > 0 ? 2.2 : 1.4}
+            />
+          )
+        })}
+
+        <Circle cx={cx} cy={cy} r={2.5} fill={colors.warning} />
+      </Svg>
+
+      <View style={{ flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xs }}>
+        <Text style={{ color: colors.textMuted, fontSize: Typography.xs, fontFamily: Typography.mono }}>
+          Roll {roll.toFixed(1)}°
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: Typography.xs, fontFamily: Typography.mono }}>
+          Pitch {pitch.toFixed(1)}°
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: Typography.xs, fontFamily: Typography.mono }}>
+          Yaw {yaw.toFixed(1)}°
+        </Text>
+      </View>
+    </View>
+  )
+}
+
+function TelemetryCard({
+  title,
+  value,
+  subtitle,
+  accent,
+  colors,
+  ringValue,
+  ringLabel,
+  ringTrack,
+  chipA,
+  chipB,
+  barLabel,
+  barValue,
+  isCritical = false,
+}: {
+  title: string
+  value: string
+  subtitle: string
+  accent: string
+  colors: AppColors
+  ringValue: number
+  ringLabel: string
+  ringTrack: string
+  chipA: { label: string; value: string }
+  chipB: { label: string; value: string }
+  barLabel: string
+  barValue: number
+  isCritical?: boolean
+}) {
+  const barCount = 10
+  const activeBars = Math.max(1, Math.round(clamp(barValue, 0, 100) / 10))
+
+  return (
+    <View style={motionStyles.telemetryCardOuter}>
+      <LinearGradient
+        colors={[
+          accent + '24',
+          isCritical ? accent + '0F' : accent + '12',
+          colors.surface,
+        ]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[motionStyles.telemetryCard, { borderColor: colors.border, backgroundColor: colors.surfaceRaised }]}
+      >
+        <View style={motionStyles.telemetryTopRow}>
+          <View style={motionStyles.telemetryCopy}>
+            <Text style={[motionStyles.telemetryTitle, { color: colors.textMuted }]}>{title}</Text>
+            <Text style={[motionStyles.telemetryValue, { color: accent }]}>{value}</Text>
+            <Text style={[motionStyles.telemetrySubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
+          </View>
+
+          <View style={motionStyles.telemetryRingWrap}>
+            <RingGauge
+              value={ringValue}
+              size={76}
+              stroke={7}
+              color={accent}
+              track={ringTrack}
+            />
+            <View style={motionStyles.telemetryRingLabelWrap}>
+              <Text style={[motionStyles.telemetryRingLabel, { color: accent }]}>{ringLabel}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={motionStyles.telemetryChipRow}>
+          <View style={[motionStyles.telemetryChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[motionStyles.telemetryChipLabel, { color: colors.textMuted }]}>{chipA.label}</Text>
+            <Text style={[motionStyles.telemetryChipValue, { color: colors.textPrimary }]}>{chipA.value}</Text>
+          </View>
+          <View style={[motionStyles.telemetryChip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[motionStyles.telemetryChipLabel, { color: colors.textMuted }]}>{chipB.label}</Text>
+            <Text style={[motionStyles.telemetryChipValue, { color: colors.textPrimary }]}>{chipB.value}</Text>
+          </View>
+        </View>
+
+        <View style={motionStyles.telemetryBarBlock}>
+          <View style={motionStyles.telemetryBarHeader}>
+            <Text style={[motionStyles.telemetryBarLabel, { color: colors.textMuted }]}>{barLabel}</Text>
+            <Text style={[motionStyles.telemetryBarValue, { color: accent }]}>{Math.round(barValue)}%</Text>
+          </View>
+          <View style={motionStyles.telemetryBars}>
+            {Array.from({ length: barCount }, (_, index) => {
+              const isActive = index < activeBars
+              return (
+                <View
+                  key={index}
+                  style={[
+                    motionStyles.telemetryBar,
+                    {
+                      backgroundColor: isActive ? accent : ringTrack,
+                      opacity: isActive ? 1 : 0.45,
+                      height: 9 + (index % 3) * 3,
+                    },
+                  ]}
+                />
+              )
+            })}
+          </View>
+        </View>
+      </LinearGradient>
+    </View>
+  )
 }
 
 export default function DashboardScreen() {
-  const { colors } = useTheme()
+  const { colors, isDark } = useTheme()
   const { mode, bleConnected, deviceRssi } = useConnectivity()
-  const { slowPacket, fastPacket, connectedId, updatePhoneLocation } = useBle()
+  const { slowPacket, fastPacketRef, connectedId, updatePhoneLocation } = useBle()
   const { location } = usePhoneLocation(true)
   const { width: screenWidth } = useWindowDimensions()
   const styles = useMemo(() => makeStyles(colors), [colors])
+
+  const fastPacket = fastPacketRef.current as FastPacket | null
 
   const hrHist = useRef<VitalPoint[]>([])
   const o2Hist = useRef<VitalPoint[]>([])
@@ -119,13 +497,15 @@ export default function DashboardScreen() {
   const altitude = location?.altitude ?? null
   const status = deriveStatus(vertSpeed, altitude, fastPacket?.stationary ?? 1)
   const statusCfg = STATUS_CFG[status]
+  const heroGradient = isDark
+    ? [statusCfg.color + '25', colors.surfaceRaised, colors.surface] as const
+    : [statusCfg.color + '16', '#FFFFFF', colors.surfaceRaised] as const
 
   const gForce = fastPacket
     ? Math.sqrt(fastPacket.accelX ** 2 + fastPacket.accelY ** 2 + fastPacket.accelZ ** 2)
     : null
 
-  const cardInner = screenWidth - Spacing.md * 2 - Spacing.md * 2
-  const sparkW = Math.floor((screenWidth - Spacing.md * 4 - Spacing.sm) / 2)
+  const sparkW = Math.floor((screenWidth - Spacing.md * 2 - Spacing.sm) / 2 - Spacing.md * 2)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -134,45 +514,33 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ──────────────────────────────────── */}
-        <MotiView
-          from={{ opacity: 0, translateY: -6 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: 'timing', duration: 260 }}
-          style={styles.header}
-        >
+        {/* ── Header ── */}
+        <View style={styles.header}>
           <View>
-            <Text style={styles.appTitle}>SKYDIVER</Text>
+            <Text style={styles.appTitle}>SkyDiver</Text>
             <Text style={styles.subTitle}>
-              {isConnected ? 'Device connected' : 'No device'}
+              {isConnected ? 'Device connected' : 'No device connected'}
             </Text>
           </View>
           <ConnectionBadge mode={mode} bleConnected={bleConnected} deviceRssi={deviceRssi} />
-        </MotiView>
+        </View>
 
-        {/* ── Altitude + status hero ───────────────────── */}
-        <MotiView
-          from={{ opacity: 0, translateY: 14 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: 'spring', damping: 18, stiffness: 100, delay: 60 }}
-          style={[styles.heroCard, { borderColor: statusCfg.color + '30' }]}
-        >
+        {/* ── Hero Altitude Card ── */}
+        <View style={[styles.heroCard, { borderColor: statusCfg.color + '35' }]}>
+          <LinearGradient
+            colors={heroGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroGradient}
+          />
+
           <View style={styles.heroTop}>
-            <Badge variant={statusCfg.variant} className="flex-row items-center gap-1.5">
-              <MotiView
-                from={{ opacity: 1, scale: 1 }}
-                animate={statusCfg.pulse ? { opacity: 0.15, scale: 1.8 } : { opacity: 1, scale: 1 }}
-                transition={
-                  statusCfg.pulse
-                    ? { type: 'timing', duration: 850, loop: true, repeatReverse: true }
-                    : { type: 'timing', duration: 200 }
-                }
-                style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: statusCfg.color }}
-              />
-              <UIText className="text-xs font-bold tracking-widest" style={{ color: statusCfg.color }}>
+            <View style={styles.statusPill}>
+              <View style={[styles.statusDot, { backgroundColor: statusCfg.color }]} />
+              <Text style={[styles.statusLabel, { color: statusCfg.color }]}>
                 {statusCfg.label}
-              </UIText>
-            </Badge>
+              </Text>
+            </View>
             <Text style={styles.sessionTimer}>
               {formatDuration(Date.now() - sessionStart.current)}
             </Text>
@@ -187,279 +555,219 @@ export default function DashboardScreen() {
 
           <View style={styles.heroMeta}>
             <View style={styles.metaChip}>
-              <Ionicons name="arrow-down" size={11} color={colors.textMuted} />
+              <Ionicons name="arrow-down" size={10} color={colors.textMuted} />
               <Text style={styles.metaText}>{Math.abs(vertSpeed).toFixed(1)} m/s</Text>
             </View>
-            {location ? (
-              <View style={styles.metaChip}>
-                <Ionicons name="location-outline" size={11} color={colors.textMuted} />
-                <Text style={styles.metaText}>
-                  {location.latitude.toFixed(5)}°  {location.longitude.toFixed(5)}°
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.metaChip}>
-                <Ionicons name="location-outline" size={11} color={colors.textMuted} />
-                <Text style={styles.metaText}>Acquiring GPS…</Text>
-              </View>
-            )}
+            <View style={styles.metaChip}>
+              <Ionicons name="location-outline" size={10} color={colors.textMuted} />
+              <Text style={styles.metaText}>
+                {location
+                  ? `${location.latitude.toFixed(4)}°  ${location.longitude.toFixed(4)}°`
+                  : 'Acquiring GPS…'
+                }
+              </Text>
+            </View>
           </View>
 
-          <AnimatePresence>
-            {altHist.current.length >= 2 && (
-              <MotiView
-                key="sparkline"
-                from={{ opacity: 0, scaleX: 0.85 }}
-                animate={{ opacity: 1, scaleX: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ type: 'spring', damping: 16, stiffness: 120 }}
-                style={[styles.sparkWrap, { transformOrigin: 'left' } as any]}
-              >
-                <SparkLine
-                  data={altHist.current}
-                  color={statusCfg.color}
-                  width={cardInner}
-                  height={44}
-                />
-              </MotiView>
-            )}
-          </AnimatePresence>
-        </MotiView>
+          {altHist.current.length >= 2 && (
+            <View style={styles.sparkWrap}>
+              <SparkLine
+                data={altHist.current}
+                color={statusCfg.color}
+                width={screenWidth - Spacing.md * 4}
+                height={36}
+              />
+            </View>
+          )}
+        </View>
 
-        {/* ── Vitals header ────────────────────────────── */}
-        <MotiView
-          from={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ type: 'timing', duration: 240, delay: 120 }}
-          style={styles.sectionRow}
-        >
+        {/* ── Vitals section ── */}
+        <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Vitals</Text>
           {isConnected && (
             <View style={styles.liveChip}>
               <MotiView
-                from={{ opacity: 1, scale: 1 }}
-                animate={{ opacity: 0.15, scale: 1.7 }}
+                from={{ opacity: 1 }}
+                animate={{ opacity: 0.2 }}
                 transition={{ type: 'timing', duration: 900, loop: true, repeatReverse: true }}
                 style={[styles.liveDot, { backgroundColor: colors.success }]}
               />
               <Text style={[styles.liveText, { color: colors.success }]}>Live</Text>
             </View>
           )}
-        </MotiView>
+        </View>
 
-        {/* ── Vitals MetricCard grid ───────────────────── */}
-        <AnimatePresence>
-          {isConnected && slowPacket ? (
-            <MotiView
-              key="vitals-grid"
-              from={{ opacity: 0, translateY: 12 }}
-              animate={{ opacity: 1, translateY: 0 }}
-              exit={{ opacity: 0, translateY: -8 }}
-              transition={{ type: 'spring', damping: 18, stiffness: 110, delay: 140 }}
-            >
-              <View style={styles.metricRow}>
-                <MetricCard
-                  label="Heart Rate"
-                  value={Math.round(slowPacket.bpm)}
-                  unit="bpm"
-                  color={colors.heartRate}
-                  warning={slowPacket.bpm > 160}
-                  delay={140}
-                >
-                  <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ type: 'timing', duration: 400, delay: 220 }}>
-                    <SparkLine data={hrHist.current} color={slowPacket.bpm > 160 ? colors.danger : colors.heartRate} width={sparkW} height={20} />
-                  </MotiView>
-                </MetricCard>
-                <MetricCard
-                  label="SpO₂"
-                  value={Math.round(slowPacket.spo2)}
-                  unit="%"
-                  color={colors.oxygen}
-                  warning={slowPacket.spo2 < 93}
-                  delay={170}
-                >
-                  <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ type: 'timing', duration: 400, delay: 260 }}>
-                    <SparkLine data={o2Hist.current} color={slowPacket.spo2 < 93 ? colors.danger : colors.oxygen} width={sparkW} height={20} />
-                  </MotiView>
-                </MetricCard>
-              </View>
-
-              <View style={styles.metricRow}>
-                <MetricCard
-                  label="Stress"
-                  value={Math.round(slowPacket.stressPct)}
-                  unit="%"
-                  color={colors.stress}
-                  warning={slowPacket.stressPct > 80}
-                  progress={slowPacket.stressPct}
-                  delay={200}
-                />
-                <MetricCard
-                  label="Temperature"
-                  value={slowPacket.tempC.toFixed(1)}
-                  unit="°C"
-                  color={colors.temperature}
-                  warning={slowPacket.tempC > 37.5}
-                  delay={230}
-                />
-              </View>
-
-              {fastPacket && gForce !== null && (
-                <View style={styles.metricRow}>
-                  <MetricCard
-                    label="G-Force"
-                    value={gForce.toFixed(2)}
-                    unit="g"
-                    color={gForce > 3 ? colors.warning : colors.primary}
-                    warning={gForce > 4}
-                    delay={260}
-                  />
-                  <MetricCard
-                    label="Vert Speed"
-                    value={Math.abs(vertSpeed).toFixed(1)}
-                    unit="m/s"
-                    color={colors.primary}
-                    delay={290}
+        {isConnected && slowPacket ? (
+          <View>
+            <View style={styles.metricRow}>
+              <MetricCard
+                label="Heart Rate"
+                value={Math.round(slowPacket.bpm)}
+                unit="bpm"
+                color={colors.heartRate}
+                warning={slowPacket.bpm > 160}
+                icon="heart-outline"
+              >
+                <View style={styles.sparkInCard}>
+                  <SparkLine
+                    data={hrHist.current}
+                    color={slowPacket.bpm > 160 ? colors.danger : colors.heartRate}
+                    width={sparkW}
+                    height={22}
                   />
                 </View>
-              )}
-            </MotiView>
-          ) : (
-            <MotiView
-              key="vitals-empty"
-              from={{ opacity: 0, translateY: 8 }}
-              animate={{ opacity: 1, translateY: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ type: 'timing', duration: 260, delay: 140 }}
-              style={styles.emptyCard}
-            >
-              <Ionicons name="bluetooth-outline" size={22} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>No device connected</Text>
-              <Text style={styles.emptyBody}>
-                Connect a SkyWatch wearable to see live vitals
-              </Text>
-            </MotiView>
-          )}
-        </AnimatePresence>
+              </MetricCard>
+              <MetricCard
+                label="SpO₂"
+                value={Math.round(slowPacket.spo2)}
+                unit="%"
+                color={colors.oxygen}
+                warning={slowPacket.spo2 < 93}
+                icon="water-outline"
+              >
+                <View style={styles.sparkInCard}>
+                  <SparkLine
+                    data={o2Hist.current}
+                    color={slowPacket.spo2 < 93 ? colors.danger : colors.oxygen}
+                    width={sparkW}
+                    height={22}
+                  />
+                </View>
+              </MetricCard>
+            </View>
 
-        {/* ── Motion · IMU ─────────────────────────────── */}
+            <View style={styles.metricRow}>
+              <MetricCard
+                label="Stress Index"
+                value={Math.round(slowPacket.stressPct)}
+                unit="%"
+                color={colors.stress}
+                warning={slowPacket.stressPct > 80}
+                icon="pulse-outline"
+                progress={slowPacket.stressPct}
+              />
+              <MetricCard
+                label="Temperature"
+                value={slowPacket.tempC.toFixed(1)}
+                unit="°C"
+                color={colors.temperature}
+                warning={slowPacket.tempC > 37.5}
+                icon="thermometer-outline"
+              />
+            </View>
+
+            {gForce !== null && (
+              <View style={styles.metricRow}>
+                <MetricCard
+                  label="G-Force"
+                  value={gForce.toFixed(2)}
+                  unit="g"
+                  color={gForce > 3 ? colors.warning : colors.primary}
+                  warning={gForce > 4}
+                  icon="speedometer-outline"
+                />
+                <MetricCard
+                  label="Vert Speed"
+                  value={Math.abs(vertSpeed).toFixed(1)}
+                  unit="m/s"
+                  color={colors.primary}
+                  icon="arrow-down-outline"
+                />
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.emptyCard}>
+            <Ionicons name="bluetooth-outline" size={28} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>No device connected</Text>
+            <Text style={styles.emptyBody}>
+              Connect a SkyWatch wearable to see live vitals
+            </Text>
+          </View>
+        )}
+
+        {/* ── IMU Section ── */}
         {fastPacket && (
-          <MotiView
-            from={{ opacity: 0, translateY: 12 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: 'spring', damping: 18, stiffness: 110, delay: 180 }}
-          >
+          <View>
             <View style={styles.sectionRow}>
               <Text style={styles.sectionTitle}>Motion · IMU</Text>
               {fastPacket.stationary === 1 && (
-                <Text style={styles.staticLabel}>Stationary</Text>
+                <View style={styles.staticPill}>
+                  <Text style={styles.staticText}>Stationary</Text>
+                </View>
               )}
             </View>
 
             <View style={styles.imuCard}>
-              <Text style={styles.imuGroup}>Orientation</Text>
-              <View style={styles.imuRow}>
-                {[
-                  { label: 'Roll',  val: `${fastPacket.rollDeg.toFixed(1)}°` },
-                  { label: 'Pitch', val: `${fastPacket.pitchDeg.toFixed(1)}°` },
-                  { label: 'Yaw',   val: `${fastPacket.yawDeg.toFixed(1)}°` },
-                ].map(item => (
-                  <View key={item.label} style={styles.imuCell}>
-                    <Text style={styles.imuLabel}>{item.label}</Text>
-                    <Text style={[styles.imuValue, { color: colors.textSecondary }]}>{item.val}</Text>
-                  </View>
-                ))}
-              </View>
+              <MotionCube
+                roll={fastPacket.rollDeg}
+                pitch={fastPacket.pitchDeg}
+                yaw={fastPacket.yawDeg}
+                colors={colors}
+              />
 
               <View style={styles.imuDivider} />
 
-              <Text style={styles.imuGroup}>Accel (g)</Text>
-              <View style={styles.imuRow}>
-                {[
-                  { label: 'X', val: fastPacket.accelX.toFixed(3) },
-                  { label: 'Y', val: fastPacket.accelY.toFixed(3) },
-                  { label: 'Z', val: fastPacket.accelZ.toFixed(3) },
-                ].map(item => (
-                  <View key={item.label} style={styles.imuCell}>
-                    <Text style={styles.imuLabel}>{item.label}</Text>
-                    <Text style={[styles.imuValue, { color: colors.primary }]}>
-                      {item.val}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.imuDivider} />
-
-              <Text style={styles.imuGroup}>Gyro (dps)</Text>
-              <View style={styles.imuRow}>
-                {[
-                  { label: 'X', val: fastPacket.gyroX.toFixed(1) },
-                  { label: 'Y', val: fastPacket.gyroY.toFixed(1) },
-                  { label: 'Z', val: fastPacket.gyroZ.toFixed(1) },
-                ].map(item => (
-                  <View key={item.label} style={styles.imuCell}>
-                    <Text style={styles.imuLabel}>{item.label}</Text>
-                    <Text style={[styles.imuValue, { color: colors.stress }]}>
-                      {item.val}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          </MotiView>
-        )}
-
-        {/* ── Device ───────────────────────────────────── */}
-        {slowPacket && (
-          <MotiView
-            from={{ opacity: 0, translateY: 12 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: 'spring', damping: 18, stiffness: 110, delay: 220 }}
-          >
-            <View style={styles.sectionRow}>
-              <Text style={styles.sectionTitle}>Device</Text>
-            </View>
-
-            <View style={styles.deviceRow}>
-              <View style={styles.battCard}>
-                <View style={styles.battTop}>
-                  <Ionicons
-                    name={slowPacket.battPct > 20 ? 'battery-half' : 'battery-dead'}
-                    size={16}
-                    color={slowPacket.battPct > 20 ? colors.battery : colors.danger}
-                  />
-                  <Text style={[
-                    styles.battPct,
-                    { color: slowPacket.battPct > 20 ? colors.battery : colors.danger },
-                  ]}>
-                    {Math.round(slowPacket.battPct)}%
+              <View style={styles.imuReadoutRow}>
+                <View style={styles.imuReadoutCell}>
+                  <Text style={styles.imuLabel}>Accel Vector</Text>
+                  <Text style={[styles.imuValue, { color: colors.oxygen }]}>
+                    {fastPacket.accelX.toFixed(2)} / {fastPacket.accelY.toFixed(2)} / {fastPacket.accelZ.toFixed(2)}
                   </Text>
                 </View>
-                <Progress
-                  value={slowPacket.battPct}
-                  className="h-1.5 mb-1"
-                  indicatorClassName={slowPacket.battPct > 20 ? 'bg-battery' : 'bg-destructive'}
-                />
-                <Text style={styles.battDetail}>
-                  {slowPacket.voltageV.toFixed(2)} V · {slowPacket.currentMA} mA
-                </Text>
-              </View>
-
-              <View style={styles.sysCard}>
-                {[
-                  { label: 'CPU', val: `${Math.round(slowPacket.cpuPct)}%` },
-                  { label: 'Seq', val: `#${slowPacket.seq}` },
-                  { label: 'Up',  val: `${(slowPacket.uptimeMs / 1000).toFixed(0)}s` },
-                ].map(item => (
-                  <View key={item.label} style={styles.sysRow}>
-                    <Text style={styles.sysLabel}>{item.label}</Text>
-                    <Text style={styles.sysVal}>{item.val}</Text>
-                  </View>
-                ))}
+                <View style={styles.imuReadoutCell}>
+                  <Text style={styles.imuLabel}>Gyro Vector</Text>
+                  <Text style={[styles.imuValue, { color: colors.stress }]}>
+                    {fastPacket.gyroX.toFixed(1)} / {fastPacket.gyroY.toFixed(1)} / {fastPacket.gyroZ.toFixed(1)}
+                  </Text>
+                </View>
               </View>
             </View>
-          </MotiView>
+          </View>
+        )}
+
+        {/* ── Device ── */}
+        {slowPacket && (
+          <View>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Device Telemetry</Text>
+              <Text style={styles.sectionHint}>Battery and compute load</Text>
+            </View>
+
+            <View style={styles.deviceGrid}>
+              <TelemetryCard
+                title="Battery"
+                value={`${Math.round(slowPacket.battPct)}%`}
+                subtitle={`${slowPacket.voltageV.toFixed(2)} V · ${slowPacket.currentMA} mA`}
+                accent={slowPacket.battPct > 20 ? colors.battery : colors.danger}
+                colors={colors}
+                ringValue={slowPacket.battPct}
+                ringLabel={slowPacket.battPct > 20 ? 'OK' : 'LOW'}
+                ringTrack={colors.border}
+                chipA={{ label: 'Voltage', value: `${slowPacket.voltageV.toFixed(2)} V` }}
+                chipB={{ label: 'Current', value: `${slowPacket.currentMA} mA` }}
+                barLabel="Charge"
+                barValue={slowPacket.battPct}
+                isCritical={slowPacket.battPct <= 20}
+              />
+
+              <TelemetryCard
+                title="CPU Load"
+                value={`${Math.round(slowPacket.cpuPct)}%`}
+                subtitle="Realtime compute usage"
+                accent={slowPacket.cpuPct < 75 ? colors.primary : colors.warning}
+                colors={colors}
+                ringValue={slowPacket.cpuPct}
+                ringLabel={slowPacket.cpuPct < 75 ? 'STABLE' : 'HOT'}
+                ringTrack={colors.border}
+                chipA={{label:'Load',value: `${Math.round(slowPacket.cpuPct)}%`}}
+                chipB={{label:'Seq', value: '#' + slowPacket.seq}}
+                barLabel="Utilization"
+                barValue={slowPacket.cpuPct}
+                isCritical={slowPacket.cpuPct >= 75}
+              />
+            </View>
+          </View>
         )}
 
         <View style={{ height: Spacing.xl }} />
@@ -484,21 +792,24 @@ function makeStyles(colors: AppColors) {
       fontSize: Typography.lg,
       fontWeight: Typography.bold,
       color: colors.textPrimary,
-      letterSpacing: 4,
+      letterSpacing: 0.5,
     },
     subTitle: {
       fontSize: Typography.xs,
       color: colors.textMuted,
       marginTop: 2,
-      letterSpacing: 0.3,
     },
 
     heroCard: {
-      backgroundColor: colors.surfaceRaised,
       borderRadius: Radius.lg,
       borderWidth: 1,
       padding: Spacing.md,
       marginBottom: Spacing.md,
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    heroGradient: {
+      ...StyleSheet.absoluteFillObject,
     },
     heroTop: {
       flexDirection: 'row',
@@ -506,9 +817,24 @@ function makeStyles(colors: AppColors) {
       alignItems: 'center',
       marginBottom: Spacing.sm,
     },
+    statusPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: Radius.full,
+      backgroundColor: colors.surface + 'C0',
+    },
+    statusDot: { width: 6, height: 6, borderRadius: 3 },
+    statusLabel: {
+      fontSize: Typography.xs,
+      fontWeight: Typography.bold,
+      letterSpacing: 1.5,
+    },
     sessionTimer: {
-      fontSize: Typography.sm,
-      color: colors.textMuted,
+      fontSize: Typography.xs,
+      color: colors.textSecondary,
       fontFamily: Typography.mono,
     },
 
@@ -519,22 +845,23 @@ function makeStyles(colors: AppColors) {
       marginBottom: Spacing.xs,
     },
     altValue: {
-      fontSize: 60,
+      fontSize: 56,
       fontWeight: Typography.bold,
       fontFamily: Typography.mono,
       fontVariant: ['tabular-nums'],
-      lineHeight: 66,
+      lineHeight: 60,
     },
     altUnit: {
-      fontSize: Typography.xl,
-      marginBottom: 10,
+      fontSize: Typography.lg,
+      marginBottom: 8,
+      fontFamily: Typography.mono,
     },
 
     heroMeta: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      gap: Spacing.sm,
-      marginBottom: Spacing.sm,
+      gap: Spacing.md,
+      marginBottom: Spacing.xs,
     },
     metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     metaText: {
@@ -543,32 +870,43 @@ function makeStyles(colors: AppColors) {
       fontFamily: Typography.mono,
     },
 
-    sparkWrap: { marginTop: Spacing.xs, overflow: 'hidden' },
+    sparkWrap: { marginTop: Spacing.sm, overflow: 'hidden' },
 
     sectionRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: Spacing.sm,
-      marginTop: 4,
+      marginTop: 2,
     },
     sectionTitle: {
       fontSize: Typography.xs,
       fontWeight: Typography.semibold,
       color: colors.textMuted,
       textTransform: 'uppercase',
-      letterSpacing: 1.4,
+      letterSpacing: 1.2,
+    },
+    sectionHint: {
+      fontSize: Typography.xs,
+      color: colors.textMuted,
     },
     liveChip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     liveDot: { width: 6, height: 6, borderRadius: 3 },
     liveText: { fontSize: Typography.xs, fontWeight: Typography.medium },
-    staticLabel: { fontSize: Typography.xs, color: colors.textMuted },
 
     metricRow: {
       flexDirection: 'row',
       gap: Spacing.sm,
       marginBottom: Spacing.sm,
     },
+
+    deviceGrid: {
+      flexDirection: 'column',
+      gap: Spacing.sm,
+      marginBottom: Spacing.md,
+    },
+
+    sparkInCard: { marginTop: Spacing.sm },
 
     emptyCard: {
       backgroundColor: colors.surfaceRaised,
@@ -592,31 +930,41 @@ function makeStyles(colors: AppColors) {
       lineHeight: Typography.sm * 1.6,
     },
 
+    staticPill: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: Radius.full,
+      backgroundColor: colors.border,
+    },
+    staticText: { fontSize: Typography.xs, color: colors.textMuted },
+
     imuCard: {
       backgroundColor: colors.surfaceRaised,
-      borderRadius: Radius.lg,
+      borderRadius: Radius.md,
       borderWidth: 1,
       borderColor: colors.border,
       padding: Spacing.md,
       marginBottom: Spacing.md,
     },
-    imuGroup: {
-      fontSize: Typography.xs,
-      color: colors.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: 1,
-      marginBottom: Spacing.sm,
-    },
-    imuRow: {
+    imuReadoutRow: {
       flexDirection: 'row',
-      marginBottom: Spacing.sm,
+      gap: Spacing.sm,
     },
-    imuCell: { flex: 1, alignItems: 'center' },
+    imuReadoutCell: {
+      flex: 1,
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: Spacing.xs,
+      borderRadius: Radius.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
     imuLabel: { fontSize: Typography.xs, color: colors.textMuted, marginBottom: 3 },
     imuValue: {
-      fontSize: Typography.base,
+      fontSize: Typography.sm,
       fontWeight: Typography.semibold,
       fontFamily: Typography.mono,
+      fontVariant: ['tabular-nums'],
     },
     imuDivider: {
       height: 1,
@@ -624,11 +972,8 @@ function makeStyles(colors: AppColors) {
       marginVertical: Spacing.sm,
     },
 
-    deviceRow: {
-      flexDirection: 'row',
-      gap: Spacing.sm,
-      marginBottom: Spacing.md,
-    },
+    deviceRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
+
     battCard: {
       flex: 1,
       backgroundColor: colors.surfaceRaised,
@@ -637,22 +982,63 @@ function makeStyles(colors: AppColors) {
       borderColor: colors.border,
       padding: Spacing.md,
     },
-    battTop: {
+    gaugeHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: Spacing.xs,
+      gap: Spacing.sm,
       marginBottom: Spacing.sm,
     },
-    battPct: {
-      fontSize: Typography.md,
+    gaugeWrap: {
+      width: 66,
+      height: 66,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    gaugeValue: {
+      position: 'absolute',
+      fontSize: Typography.xs,
       fontWeight: Typography.bold,
       fontFamily: Typography.mono,
     },
-    battDetail: {
+    gaugeMeta: {
+      flex: 1,
+      gap: 2,
+    },
+    gaugeTitle: {
+      fontSize: Typography.sm,
+      color: colors.textPrimary,
+      fontWeight: Typography.semibold,
+    },
+    gaugeSub: {
       fontSize: Typography.xs,
       color: colors.textMuted,
       fontFamily: Typography.mono,
-      marginTop: 4,
+    },
+    deviceMetaRow: {
+      flexDirection: 'row',
+      gap: Spacing.xs,
+    },
+    deviceChip: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: Radius.sm,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      gap: 2,
+    },
+    deviceChipLabel: {
+      fontSize: Typography.xs,
+      textTransform: 'uppercase',
+      color: colors.textMuted,
+      letterSpacing: 0.6,
+    },
+    deviceChipValue: {
+      fontSize: Typography.sm,
+      color: colors.textPrimary,
+      fontFamily: Typography.mono,
+      fontWeight: Typography.semibold,
     },
 
     sysCard: {
@@ -662,25 +1048,6 @@ function makeStyles(colors: AppColors) {
       borderWidth: 1,
       borderColor: colors.border,
       padding: Spacing.md,
-      justifyContent: 'center',
-      gap: Spacing.sm,
-    },
-    sysRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    sysLabel: {
-      fontSize: Typography.xs,
-      color: colors.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    sysVal: {
-      fontSize: Typography.sm,
-      fontWeight: Typography.semibold,
-      color: colors.textPrimary,
-      fontFamily: Typography.mono,
     },
   })
 }

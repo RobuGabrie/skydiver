@@ -33,6 +33,7 @@ interface DeviceRowProps {
 function DeviceRow({ name, id, rssi, connected, onPress, colors, index }: DeviceRowProps) {
   const styles = useMemo(() => makeStyles(colors), [colors])
   const bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1
+  const displayName = name.trim().length > 0 ? name : `Device ${id.slice(0, 8)}`
 
   return (
     <MotiView
@@ -50,7 +51,7 @@ function DeviceRow({ name, id, rssi, connected, onPress, colors, index }: Device
           <Ionicons name="watch-outline" size={22} color={connected ? colors.ble : colors.textMuted} />
         </View>
         <View style={styles.deviceInfo}>
-          <Text style={styles.deviceName}>{name}</Text>
+          <Text style={styles.deviceName}>{displayName}</Text>
           <Text style={styles.deviceId}>{id}</Text>
           <View style={styles.signalRow}>
             {[1, 2, 3, 4].map(b => (

@@ -3,6 +3,7 @@ import "./globals.css"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { ThemeProvider } from "@/components/layout/theme-provider"
+import { MockModeProvider } from "@/lib/mock-context"
 
 export const metadata: Metadata = {
   title: "Skydiver Monitor",
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head suppressHydrationWarning />
       <body className="min-h-full bg-background">
         <ThemeProvider>
+          <MockModeProvider>
           <TooltipProvider>
             <div className="flex h-screen overflow-hidden">
               <AppSidebar />
@@ -23,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </main>
             </div>
           </TooltipProvider>
+          </MockModeProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { Alert } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { AlertTriangle, Info, XCircle, CheckCircle2, X } from "lucide-react"
@@ -41,7 +42,13 @@ export function AlertFeed({
   maxItems?: number
 }) {
   const [now, setNow] = useState<number | null>(null)
-  const visible = alerts.slice(0, maxItems)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const previewCount = 3
+  const shouldCollapse = alerts.length > previewCount
+  const visibleCount = isExpanded ? maxItems : Math.min(previewCount, maxItems)
+  const visible = alerts.slice(0, visibleCount)
+  const hiddenCount = Math.max(0, Math.min(alerts.length, maxItems) - visible.length)
+  const hasMoreThanCap = alerts.length > maxItems
   const unread = alerts.filter(a => !a.acknowledged).length
 
   useEffect(() => {
@@ -59,9 +66,14 @@ export function AlertFeed({
       {unread > 0 && (
         <div className="flex items-center justify-between mb-1">
           <span className="text-sm text-muted-foreground">{unread} unacknowledged</span>
-          <Button variant="ghost" size="sm" className="h-7 text-sm px-2 cursor-pointer" onClick={onAcknowledgeAll}>
-            Acknowledge all
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Link href="/alerts" className="text-xs text-primary hover:text-primary/80 transition-colors">
+              Open Alerts page
+            </Link>
+            <Button variant="ghost" size="sm" className="h-7 text-sm px-2 cursor-pointer" onClick={onAcknowledgeAll}>
+              Acknowledge all
+            </Button>
+          </div>
         </div>
       )}
 
@@ -72,49 +84,69 @@ export function AlertFeed({
         </div>
       )}
 
-      {visible.map(alert => {
-        const cfg = SEVERITY_CONFIG[alert.severity]
-        const Icon = cfg.icon
-        return (
-          <div
-            key={alert.id}
-            className={cn(
-              "flex gap-3 p-3 rounded-lg border transition-opacity duration-200",
-              cfg.bg,
-              alert.acknowledged && "opacity-40"
-            )}
-          >
-            <Icon className={cn("w-4 h-4 mt-0.5 shrink-0", cfg.color)} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className="font-semibold text-foreground text-sm">{alert.skydiverName}</span>
-                <Badge variant="outline" className={cn("text-xs h-5 px-1.5 font-mono", cfg.badge)}>
-                  {alert.severity.toUpperCase()}
-                </Badge>
-              </div>
-              <p className="text-sm text-foreground/80 leading-snug">{alert.message}</p>
-              {alert.value !== undefined && (
-                <p className="text-xs font-mono text-muted-foreground mt-1">
-                  Value: <span className={cfg.color}>{alert.value}</span>
-                  {alert.threshold && <> · Threshold: {alert.threshold}</>}
-                </p>
+      <div className={cn("space-y-2", isExpanded && "max-h-[28rem] overflow-y-auto pr-1") }>
+        {visible.map(alert => {
+          const cfg = SEVERITY_CONFIG[alert.severity]
+          const Icon = cfg.icon
+          return (
+            <div
+              key={alert.id}
+              className={cn(
+                "flex gap-3 p-3 rounded-lg border transition-opacity duration-200",
+                cfg.bg,
+                alert.acknowledged && "opacity-40"
               )}
-              <p className="text-xs text-muted-foreground mt-1" suppressHydrationWarning>
-                {now === null ? "just now" : formatDistance(alert.timestamp, now, { addSuffix: true })}
-              </p>
+            >
+              <Icon className={cn("w-4 h-4 mt-0.5 shrink-0", cfg.color)} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-semibold text-foreground text-sm">{alert.skydiverName}</span>
+                  <Badge variant="outline" className={cn("text-xs h-5 px-1.5 font-mono", cfg.badge)}>
+                    {alert.severity.toUpperCase()}
+                  </Badge>
+                </div>
+                <p className="text-sm text-foreground/80 leading-snug">{alert.message}</p>
+                {alert.value !== undefined && (
+                  <p className="text-xs font-mono text-muted-foreground mt-1">
+                    Value: <span className={cfg.color}>{alert.value}</span>
+                    {alert.threshold && <> · Threshold: {alert.threshold}</>}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1" suppressHydrationWarning>
+                  {now === null ? "just now" : formatDistance(alert.timestamp, now, { addSuffix: true })}
+                </p>
+              </div>
+              {!alert.acknowledged && (
+                <button
+                  onClick={() => onAcknowledge(alert.id)}
+                  aria-label="Acknowledge alert"
+                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
-            {!alert.acknowledged && (
-              <button
-                onClick={() => onAcknowledge(alert.id)}
-                aria-label="Acknowledge alert"
-                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
+
+      {shouldCollapse && (
+        <div className="flex items-center justify-between pt-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs cursor-pointer"
+            onClick={() => setIsExpanded(prev => !prev)}
+          >
+            {isExpanded ? "Collapse feed" : `Show more (${hiddenCount})`}
+          </Button>
+          {(hasMoreThanCap || !isExpanded) && (
+            <Link href="/alerts" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+              View full history
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   )
 }

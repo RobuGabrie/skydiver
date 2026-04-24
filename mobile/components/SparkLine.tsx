@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { memo } from 'react'
 import { View } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 import { VitalPoint } from '../lib/types'
@@ -10,7 +10,7 @@ interface Props {
   height?: number
 }
 
-export function SparkLine({ data, color, width = 120, height = 40 }: Props) {
+export const SparkLine = memo(function SparkLine({ data, color, width = 120, height = 40 }: Props) {
   if (data.length < 2) return <View style={{ width, height }} />
 
   const values = data.map(d => d.value)
@@ -44,4 +44,4 @@ export function SparkLine({ data, color, width = 120, height = 40 }: Props) {
       />
     </Svg>
   )
-}
+})

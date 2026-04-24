@@ -1,51 +1,51 @@
 const Accents = {
-  primary:     '#00E5FF',
-  success:     '#00E676',
-  warning:     '#FFB300',
-  danger:      '#FF3B30',
-  heartRate:   '#FF4D6A',
-  oxygen:      '#00E5FF',
-  stress:      '#BF5AF2',
-  temperature: '#FFB300',
-  battery:     '#00E676',
-  wifi:        '#00BFFF',
-  ble:         '#00E5FF',
-  offline:     '#4A5568',
+  primary:     '#6366F1',  // indigo-500 — matches web primary
+  success:     '#22C55E',  // emerald-500
+  warning:     '#F59E0B',  // amber-500
+  danger:      '#EF4444',  // red-500
+  heartRate:   '#F43F5E',  // rose-500
+  oxygen:      '#06B6D4',  // cyan-500
+  stress:      '#A855F7',  // purple-500
+  temperature: '#F59E0B',  // amber-500
+  battery:     '#22C55E',  // emerald-500
+  wifi:        '#0EA5E9',  // sky-500
+  ble:         '#6366F1',  // indigo
+  offline:     '#475569',  // slate-600
 } as const
 
 export const DarkColors = {
-  background:    '#060D14',
-  surface:       '#0C1521',
-  surfaceRaised: '#111D2C',
-  border:        '#1A2D42',
-  borderMuted:   '#0E1A28',
-  textPrimary:   '#E8F4FD',
-  textSecondary: '#7BA8C8',
-  textMuted:     '#3A5A78',
-  primaryDim:    '#00131F',
-  dangerDim:     '#160404',
-  warningDim:    '#160D00',
-  infoDim:       '#00131F',
+  background:    '#0A0A0F',
+  surface:       '#111116',
+  surfaceRaised: '#18181E',
+  border:        '#242430',
+  borderMuted:   '#1C1C26',
+  textPrimary:   '#F1F5F9',   // slate-100
+  textSecondary: '#94A3B8',   // slate-400
+  textMuted:     '#64748B',   // slate-500
+  primaryDim:    '#1E1B4B',   // indigo-950
+  dangerDim:     '#1F0A0A',
+  warningDim:    '#1C1200',
+  infoDim:       '#0A0E1F',
   ...Accents,
 } as const
 
 export const LightColors = {
-  background:    '#EEF4F9',
+  background:    '#F8FAFC',
   surface:       '#FFFFFF',
-  surfaceRaised: '#F8FBFF',
-  border:        '#C0D4E8',
-  borderMuted:   '#DCE9F5',
-  textPrimary:   '#0A1628',
-  textSecondary: '#2A4A6A',
-  textMuted:     '#5A7A9A',
-  primaryDim:    '#E0FAFF',
-  dangerDim:     '#FFF0EF',
-  warningDim:    '#FFF8E1',
-  infoDim:       '#E0FAFF',
+  surfaceRaised: '#F1F5F9',
+  border:        '#E2E8F0',
+  borderMuted:   '#EEF2F8',
+  textPrimary:   '#0F172A',   // slate-900
+  textSecondary: '#334155',   // slate-700
+  textMuted:     '#64748B',   // slate-500
+  primaryDim:    '#EEF2FF',   // indigo-50
+  dangerDim:     '#FEF2F2',
+  warningDim:    '#FFFBEB',
+  infoDim:       '#EEF2FF',
   ...Accents,
 } as const
 
-export type AppColors = typeof DarkColors
+export type AppColors = typeof DarkColors | typeof LightColors
 
 export const Colors = DarkColors
 
@@ -60,9 +60,9 @@ export const Spacing = {
 
 export const Radius = {
   sm:  6,
-  md:  12,
-  lg:  16,
-  xl:  24,
+  md:  10,
+  lg:  14,
+  xl:  20,
   full: 9999,
 } as const
 
@@ -74,7 +74,7 @@ export const Typography = {
   lg:   20,
   xl:   24,
   xxl:  32,
-  hero: 52,
+  hero: 56,
 
   regular:   '400' as const,
   medium:    '500' as const,

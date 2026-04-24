@@ -1,6 +1,7 @@
 "use client"
 
-import { useSimulation } from "@/hooks/use-simulation"
+import { useState } from "react"
+import { useSkydiversData } from "@/hooks/use-skydivers-data"
 import { RiskGauge } from "@/components/analytics/risk-gauge"
 import { GroupVitalsChart, VitalsChart } from "@/components/dashboard/vitals-chart"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,9 +15,54 @@ import {
 } from "recharts"
 import {
   Brain, TrendingDown, AlertTriangle, Activity,
-  Heart, Droplets, Shield, Zap, Target, Eye
+  Heart, Droplets, Shield, Zap, Target, Eye,
+  RefreshCw, Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAIAnalysis } from "@/hooks/use-ai-analysis"
+
+type GeminiComparisonResponse = {
+  provider: "gemini" | "fallback"
+  model: string
+  summary: string
+  confidence: number
+  recommendation: string
+  findings: Array<{
+    label: string
+    severity: "critical" | "warning" | "info"
+    detail: string
+    confidence: number
+  }>
+  alignment: string[]
+  fallbackReason?: "missing_api_key" | "upstream_http_error" | "missing_text_part" | "json_parse_error" | "network_error"
+  upstreamStatus?: number
+}
+
+function formatFallbackReason(reason?: GeminiComparisonResponse["fallbackReason"], status?: number) {
+  if (!reason) return null
+  if (reason === "missing_api_key") return "Fallback reason: GEMINI_API_KEY is not configured on the server."
+  if (reason === "upstream_http_error") return `Fallback reason: Gemini API returned HTTP ${status ?? "error"}.`
+  if (reason === "missing_text_part") return "Fallback reason: Gemini response had no text payload."
+  if (reason === "json_parse_error") return "Fallback reason: Gemini response could not be parsed as JSON."
+  if (reason === "network_error") return "Fallback reason: Network or runtime error while calling Gemini."
+  return "Fallback reason: unknown"
+}
+
+function sectionSeverityClass(severity: "critical" | "warning" | "info") {
+  return severity === "critical"
+    ? "border-red-500/30 bg-red-500/5"
+    : severity === "warning"
+      ? "border-amber-500/30 bg-amber-500/5"
+      : "border-emerald-500/30 bg-emerald-500/5"
+}
+
+function sectionTextClass(severity: "critical" | "warning" | "info") {
+  return severity === "critical"
+    ? "text-red-700 dark:text-red-400"
+    : severity === "warning"
+      ? "text-amber-700 dark:text-amber-400"
+      : "text-emerald-700 dark:text-emerald-400"
+}
 
 function SectionHeader({ icon: Icon, title, subtitle }: { icon: React.ElementType; title: string; subtitle?: string }) {
   return (
@@ -25,20 +71,12 @@ function SectionHeader({ icon: Icon, title, subtitle }: { icon: React.ElementTyp
         <Icon className="w-4 h-4 text-primary" />
       </div>
       <div>
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
       </div>
     </div>
   )
 }
-
-const anomalyData = [
-  { name: "Mihai Popescu", risk: 74, rotation: 88, stress: 89, pulse: 82, oxygen: 60 },
-  { name: "Alex Mercer", risk: 18, rotation: 15, stress: 72, pulse: 40, oxygen: 85 },
-  { name: "Elena Dumitrescu", risk: 22, rotation: 20, stress: 55, pulse: 35, oxygen: 90 },
-  { name: "Sara Ionescu", risk: 5, rotation: 5, stress: 35, pulse: 10, oxygen: 95 },
-  { name: "Andrei Vlad", risk: 2, rotation: 2, stress: 18, pulse: 5, oxygen: 99 },
-]
 
 const sessionTrendData = MOCK_JUMP_HISTORY
 
@@ -59,25 +97,67 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 }
 
 export default function AnalyticsPage() {
-  const { skydivers } = useSimulation()
+  const { skydivers } = useSkydiversData()
+  const { dangers, physio, predictions, statistical, trends } = useAIAnalysis(skydivers)
+  const [gemini, setGemini] = useState<GeminiComparisonResponse | null>(null)
+  const [geminiLoading, setGeminiLoading] = useState(false)
+  const [geminiError, setGeminiError] = useState<string | null>(null)
+  const [geminiRequestedAt, setGeminiRequestedAt] = useState<Date | null>(null)
 
-  const avgRisk = Math.round(skydivers.reduce((a, s) => a + s.riskScore, 0) / skydivers.length)
-  const highRisk = skydivers.filter(s => s.riskScore > 50)
+  async function loadGemini() {
+    if (!skydivers.length) return
+
+    setGeminiLoading(true)
+    setGeminiError(null)
+
+    try {
+      const response = await fetch("/api/ai/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skydivers, statistical, trends }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Gemini request failed (${response.status})`)
+      }
+
+      const data = (await response.json()) as GeminiComparisonResponse
+      setGemini(data)
+      setGeminiRequestedAt(new Date())
+    } catch (error) {
+      setGeminiError(error instanceof Error ? error.message : "Unable to load Gemini comparison.")
+    } finally {
+      setGeminiLoading(false)
+    }
+  }
+
+  const n = skydivers.length || 1
+  const mean = (fn: (s: typeof skydivers[0]) => number) =>
+    Math.round(skydivers.reduce((a, s) => a + fn(s), 0) / n)
+
+  const avgRisk = mean(s => s.riskScore)
+
+  const anomalyData = skydivers.map(s => ({
+    name: s.name,
+    risk: s.riskScore,
+    stress: s.stress,
+    oxygen: s.oxygen,
+  }))
 
   const radarData = [
-    { metric: "Heart Rate", value: Math.round(skydivers.reduce((a, s) => a + s.heartRate, 0) / skydivers.length / 1.9) },
-    { metric: "Oxygen", value: Math.round(skydivers.reduce((a, s) => a + s.oxygen, 0) / skydivers.length) },
-    { metric: "Stress", value: 100 - Math.round(skydivers.reduce((a, s) => a + s.stress, 0) / skydivers.length) },
-    { metric: "Temperature", value: Math.round((37.5 - skydivers.reduce((a, s) => a + s.temperature, 0) / skydivers.length) * 40 + 50) },
-    { metric: "Battery", value: Math.round(skydivers.reduce((a, s) => a + s.battery, 0) / skydivers.length) },
-    { metric: "Safety", value: 100 - avgRisk },
+    { metric: "Heart Rate",  value: Math.round(mean(s => s.heartRate) / 1.9) },
+    { metric: "Oxygen",      value: mean(s => s.oxygen) },
+    { metric: "Stress",      value: 100 - mean(s => s.stress) },
+    { metric: "Temperature", value: Math.round((37.5 - mean(s => s.temperature)) * 40 + 50) },
+    { metric: "Battery",     value: mean(s => s.battery) },
+    { metric: "Safety",      value: 100 - avgRisk },
   ]
 
   return (
     <div className="p-6 min-h-screen">
       <div className="mb-6">
-        <h1 className="text-xl font-semibold">AI Analytics</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Machine learning analysis, predictions, and statistics</p>
+        <h1 className="text-2xl font-semibold">AI Analytics</h1>
+        <p className="text-base text-muted-foreground mt-0.5">Machine learning analysis, predictions, and statistics</p>
       </div>
 
       {/* Top overview */}
@@ -105,7 +185,7 @@ export default function AnalyticsPage() {
             </div>
             <div className="mt-4 p-3 rounded-lg bg-muted/30 border border-border flex items-center justify-between">
               <span className="text-xs text-muted-foreground">Session Avg Risk</span>
-              <span className={cn("text-base font-mono font-bold", avgRisk > 50 ? "text-red-400" : avgRisk > 30 ? "text-amber-400" : "text-emerald-400")}>
+              <span className={cn("text-base font-mono font-bold", avgRisk > 50 ? "text-red-700 dark:text-red-400" : avgRisk > 30 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400")}>
                 {avgRisk} / 100
               </span>
             </div>
@@ -123,8 +203,8 @@ export default function AnalyticsPage() {
           <CardContent className="pb-4">
             <ResponsiveContainer width="100%" height={240}>
               <RadarChart data={radarData} margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
-                <PolarGrid stroke="rgba(255,255,255,0.08)" />
-                <PolarAngleAxis dataKey="metric" tick={{ fill: "#64748b", fontSize: 11, fontFamily: "Fira Sans" }} />
+                <PolarGrid stroke="var(--border)" />
+                <PolarAngleAxis dataKey="metric" tick={{ fill: "var(--muted-foreground)", fontSize: 11, fontFamily: "Fira Sans" }} />
                 <Radar name="Group Avg" dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} />
               </RadarChart>
             </ResponsiveContainer>
@@ -143,38 +223,11 @@ export default function AnalyticsPage() {
             />
           </CardHeader>
           <CardContent className="pb-4 space-y-3">
-            {[
-              {
-                label: "Uncontrolled Fall",
-                skydiver: "Mihai Popescu",
-                confidence: 82,
-                severity: "critical",
-                detail: "Vertical speed exceeds 75 m/s with chaotic rotation pattern",
-              },
-              {
-                label: "Excessive Rotation",
-                skydiver: "Mihai Popescu",
-                confidence: 94,
-                severity: "critical",
-                detail: "360°/s rotation detected. Threshold: 180°/s. Possible flat spin.",
-              },
-              {
-                label: "Position Instability",
-                skydiver: "Alex Mercer",
-                confidence: 31,
-                severity: "warning",
-                detail: "Minor body position drift from stable arch. Monitoring.",
-              },
-              {
-                label: "Lack of Movement",
-                skydiver: "All Skydivers",
-                confidence: 0,
-                severity: "info",
-                detail: "No unconsciousness indicators detected. All skydivers responsive.",
-              },
-            ].map(item => (
+            {dangers.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-4">No active data — connect skydivers to see detections.</p>
+            ) : dangers.map(item => (
               <div
-                key={item.label}
+                key={item.label + item.skydiver}
                 className={cn(
                   "p-3 rounded-lg border text-xs",
                   item.severity === "critical" ? "border-red-500/30 bg-red-500/5" :
@@ -184,22 +237,22 @@ export default function AnalyticsPage() {
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className={cn("font-semibold",
-                    item.severity === "critical" ? "text-red-400" :
-                    item.severity === "warning" ? "text-amber-400" : "text-emerald-400"
+                    item.severity === "critical" ? "text-red-700 dark:text-red-400" :
+                    item.severity === "warning" ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"
                   )}>
                     {item.label}
                   </span>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground">Confidence</span>
-                    <span className={cn("font-mono font-bold text-[10px]",
-                      item.confidence > 70 ? "text-red-400" : item.confidence > 30 ? "text-amber-400" : "text-emerald-400"
+                    <span className="text-xs text-muted-foreground">Confidence</span>
+                    <span className={cn("font-mono font-bold text-xs",
+                      item.confidence > 70 ? "text-red-700 dark:text-red-400" : item.confidence > 30 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"
                     )}>
                       {item.confidence}%
                     </span>
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground/70 italic mb-1.5">{item.skydiver}</p>
-                <p className="text-[10px] text-muted-foreground">{item.detail}</p>
+                <p className="text-xs text-muted-foreground/70 italic mb-1.5">{item.skydiver}</p>
+                <p className="text-xs text-muted-foreground">{item.detail}</p>
                 {item.confidence > 0 && (
                   <Progress value={item.confidence} className={cn("h-1 mt-2",
                     item.confidence > 70 ? "[&>div]:bg-red-500" : "[&>div]:bg-amber-400"
@@ -220,46 +273,11 @@ export default function AnalyticsPage() {
             />
           </CardHeader>
           <CardContent className="pb-4 space-y-3">
-            {[
-              {
-                label: "Abnormal Pulse",
-                skydiver: "Mihai Popescu",
-                value: "168 bpm",
-                threshold: "160 bpm",
-                severity: "warning",
-                detail: "Heart rate elevated 5% above safe threshold for freefall phase.",
-                trend: "+12% vs avg",
-              },
-              {
-                label: "Elevated Stress",
-                skydiver: "Mihai Popescu",
-                value: "89%",
-                threshold: "75%",
-                severity: "critical",
-                detail: "Cortisol-proxy stress index critically elevated. Panic response pattern.",
-                trend: "+34% vs avg",
-              },
-              {
-                label: "Low SpO₂",
-                skydiver: "Mihai Popescu",
-                value: "91%",
-                threshold: "93%",
-                severity: "warning",
-                detail: "Blood oxygen below safe minimum. Altitude hypoxia suspected.",
-                trend: "-4pp vs baseline",
-              },
-              {
-                label: "Normal Physiology",
-                skydiver: "4 / 5 skydivers",
-                value: "Nominal",
-                threshold: "—",
-                severity: "info",
-                detail: "All other skydivers show normal physiological parameters.",
-                trend: "Stable",
-              },
-            ].map(item => (
+            {physio.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-4">No active data — connect skydivers to see analysis.</p>
+            ) : physio.map(item => (
               <div
-                key={item.label}
+                key={item.label + item.skydiver}
                 className={cn(
                   "p-3 rounded-lg border text-xs",
                   item.severity === "critical" ? "border-red-500/30 bg-red-500/5" :
@@ -269,21 +287,21 @@ export default function AnalyticsPage() {
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className={cn("font-semibold",
-                    item.severity === "critical" ? "text-red-400" :
-                    item.severity === "warning" ? "text-amber-400" : "text-emerald-400"
+                    item.severity === "critical" ? "text-red-700 dark:text-red-400" :
+                    item.severity === "warning" ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"
                   )}>
                     {item.label}
                   </span>
-                  <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-mono">
+                  <Badge variant="outline" className="text-xs h-5 px-2 font-mono">
                     {item.trend}
                   </Badge>
                 </div>
-                <div className="flex gap-3 text-[10px] text-muted-foreground mb-1.5">
+                <div className="flex gap-3 text-xs text-muted-foreground mb-1.5">
                   <span>Value: <span className="font-mono text-foreground">{item.value}</span></span>
                   <span>Threshold: <span className="font-mono text-foreground">{item.threshold}</span></span>
                 </div>
-                <p className="text-[10px] text-muted-foreground/70 italic mb-0.5">{item.skydiver}</p>
-                <p className="text-[10px] text-muted-foreground">{item.detail}</p>
+                <p className="text-xs text-muted-foreground/70 italic mb-0.5">{item.skydiver}</p>
+                <p className="text-xs text-muted-foreground">{item.detail}</p>
               </div>
             ))}
           </CardContent>
@@ -299,36 +317,9 @@ export default function AnalyticsPage() {
             <SectionHeader icon={Brain} title="AI Predictions" subtitle="Behavioral & risk forecasting" />
           </CardHeader>
           <CardContent className="pb-4 space-y-3">
-            {[
-              {
-                label: "Accident Risk — Mihai",
-                probability: 71,
-                severity: "critical",
-                desc: "Based on combined rotation + stress + O₂ pattern, injury probability estimated at 71% without intervention.",
-                action: "Alert instructor immediately",
-              },
-              {
-                label: "Late Deployment — Alex",
-                probability: 42,
-                severity: "warning",
-                desc: "Parachute deployment pattern suggests possible late pull at current descent rate.",
-                action: "Verbal reminder recommended",
-              },
-              {
-                label: "Abnormal Air Behavior",
-                probability: 28,
-                severity: "warning",
-                desc: "Mihai's trajectory shows non-standard body position patterns consistent with disorientation.",
-                action: "Visual check from jumpmaster",
-              },
-              {
-                label: "Safe Landing — Andrei",
-                probability: 98,
-                severity: "info",
-                desc: "All metrics within safe ranges. Normal approach trajectory.",
-                action: "No action required",
-              },
-            ].map(item => (
+            {predictions.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-4">No active predictions — connect skydivers to see forecasts.</p>
+            ) : predictions.map(item => (
               <div
                 key={item.label}
                 className={cn(
@@ -340,21 +331,21 @@ export default function AnalyticsPage() {
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className={cn("text-xs font-semibold",
-                    item.severity === "critical" ? "text-red-400" :
-                    item.severity === "warning" ? "text-amber-400" : "text-emerald-400"
+                    item.severity === "critical" ? "text-red-700 dark:text-red-400" :
+                    item.severity === "warning" ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"
                   )}>
                     {item.label}
                   </span>
                   <span className={cn("text-xs font-mono font-bold",
-                    item.probability > 60 ? "text-red-400" : item.probability > 35 ? "text-amber-400" : "text-emerald-400"
+                    item.probability > 60 ? "text-red-700 dark:text-red-400" : item.probability > 35 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"
                   )}>
                     {item.probability}%
                   </span>
                 </div>
-                <p className="text-[10px] text-muted-foreground mb-1.5">{item.desc}</p>
+                <p className="text-xs text-muted-foreground mb-1.5">{item.desc}</p>
                 <div className="flex items-center gap-1.5">
                   <Zap className="w-3 h-3 text-primary" />
-                  <span className="text-[10px] text-primary font-medium">{item.action}</span>
+                  <span className="text-xs text-primary font-medium">{item.action}</span>
                 </div>
                 <Progress value={item.probability} className={cn("h-1 mt-2",
                   item.probability > 60 ? "[&>div]:bg-red-500" : item.probability > 35 ? "[&>div]:bg-amber-400" : "[&>div]:bg-emerald-400"
@@ -373,27 +364,27 @@ export default function AnalyticsPage() {
             {/* Summary stats */}
             <div className="grid grid-cols-4 gap-3 mb-4">
               {[
-                { label: "Total Jumps", value: MOCK_SESSION_STATS.totalJumps, icon: Droplets, color: "text-blue-400" },
-                { label: "Alerts", value: MOCK_SESSION_STATS.alertsTriggered, icon: AlertTriangle, color: "text-red-400" },
-                { label: "Max Alt", value: `${(MOCK_SESSION_STATS.maxAltitude / 1000).toFixed(1)}km`, icon: TrendingDown, color: "text-violet-400" },
-                { label: "Safety", value: `${MOCK_SESSION_STATS.safetyScore}%`, icon: Shield, color: "text-emerald-400" },
+                { label: "Total Jumps", value: MOCK_SESSION_STATS.totalJumps, icon: Droplets, color: "text-blue-700 dark:text-blue-400" },
+                { label: "Alerts", value: MOCK_SESSION_STATS.alertsTriggered, icon: AlertTriangle, color: "text-red-700 dark:text-red-400" },
+                { label: "Max Alt", value: `${(MOCK_SESSION_STATS.maxAltitude / 1000).toFixed(1)}km`, icon: TrendingDown, color: "text-violet-700 dark:text-violet-400" },
+                { label: "Safety", value: `${MOCK_SESSION_STATS.safetyScore}%`, icon: Shield, color: "text-emerald-700 dark:text-emerald-400" },
               ].map(s => (
                 <div key={s.label} className="p-2.5 rounded-lg bg-muted/30 border border-border text-center">
                   <s.icon className={cn("w-4 h-4 mx-auto mb-1", s.color)} />
                   <p className={cn("text-base font-mono font-bold", s.color)}>{s.value}</p>
-                  <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
                 </div>
               ))}
             </div>
 
             {/* Bar chart - weekly */}
             <div className="mb-1">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-3">Weekly Jumps & Alerts</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Weekly Jumps & Alerts</p>
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={sessionTrendData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 10, fontFamily: "Fira Code" }} tickLine={false} />
-                  <YAxis tick={{ fill: "#64748b", fontSize: 10, fontFamily: "Fira Code" }} tickLine={false} axisLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="date" tick={{ fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "Fira Code" }} tickLine={false} />
+                  <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "Fira Code" }} tickLine={false} axisLine={false} />
                   <Tooltip content={<CustomTooltip />} />
                   <Bar dataKey="jumps" name="Jumps" fill="#3b82f6" radius={[3, 3, 0, 0]} fillOpacity={0.8} />
                   <Bar dataKey="alerts" name="Alerts" fill="#ef4444" radius={[3, 3, 0, 0]} fillOpacity={0.8} />
@@ -405,12 +396,202 @@ export default function AnalyticsPage() {
 
             {/* O2 trend */}
             <div>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-3">Group Oxygen Saturation Trend</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Group Oxygen Saturation Trend</p>
               <GroupVitalsChart data={MOCK_OXYGEN_TREND} />
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* AI comparison */}
+      <Card className="bg-card border-border mb-6 border-primary/20">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <SectionHeader
+              icon={Brain}
+              title="Computed vs Gemini AI"
+              subtitle="Client-side detection compared with Gemini interpretation"
+            />
+            <button
+              type="button"
+              onClick={() => void loadGemini()}
+              disabled={geminiLoading}
+              className="inline-flex items-center gap-2 self-start rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {geminiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh Gemini
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent className="pb-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">Computed signals</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{statistical.findings.length + trends.findings.length}</p>
+              <p className="text-xs text-muted-foreground">Statistical + trend findings</p>
+            </div>
+            <div className="rounded-xl border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">Gemini findings</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{gemini?.findings.length ?? 0}</p>
+              <p className="text-xs text-muted-foreground">Server-side interpretation</p>
+            </div>
+            <div className="rounded-xl border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">Provider</p>
+              <p className="mt-1 text-lg font-semibold text-foreground">{gemini?.provider === "gemini" ? "Gemini live" : gemini?.provider === "fallback" ? "Local fallback" : "Pending"}</p>
+              <p className="text-xs text-muted-foreground">{geminiRequestedAt ? `Requested ${geminiRequestedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Waiting for first response"}</p>
+            </div>
+          </div>
+
+          {geminiError && (
+            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-700 dark:text-red-300">
+              {geminiError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-border bg-muted/15 p-4 space-y-4">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Computed AI</p>
+                <h3 className="mt-1 text-base font-semibold text-foreground">{statistical.title}</h3>
+                <p className="text-sm text-muted-foreground mt-1">{statistical.subtitle}</p>
+                <p className="text-sm text-foreground/90 mt-2">{statistical.summary}</p>
+              </div>
+
+              <div className="space-y-2">
+                {(statistical.findings as Array<{
+                  label: string
+                  skydiver: string
+                  metric: string
+                  value: number
+                  baseline: number
+                  zScore: number
+                  severity: "critical" | "warning" | "info"
+                  detail: string
+                }>).slice(0, 3).map(item => (
+                  <div key={`${item.skydiver}-${item.label}`} className={cn("rounded-xl border p-3 text-xs", sectionSeverityClass(item.severity))}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className={cn("font-semibold", sectionTextClass(item.severity))}>{item.label}</p>
+                        <p className="text-xs text-muted-foreground">{item.skydiver}</p>
+                      </div>
+                      <Badge variant="outline" className="font-mono text-xs h-5 px-2">
+                        z {item.zScore >= 0 ? "+" : ""}{item.zScore.toFixed(1)}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{item.detail}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span className="rounded-full border border-border bg-background/60 px-2 py-1 font-mono">Value {item.value}</span>
+                      <span className="rounded-full border border-border bg-background/60 px-2 py-1 font-mono">Baseline {item.baseline.toFixed(1)}</span>
+                      <span className="rounded-full border border-border bg-background/60 px-2 py-1 font-mono">Metric {item.metric}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">{trends.title}</h4>
+                  <p className="text-sm text-muted-foreground mt-1">{trends.subtitle}</p>
+                  <p className="text-sm text-foreground/90 mt-2">{trends.summary}</p>
+                </div>
+                {(trends.findings as Array<{
+                  label: string
+                  skydiver: string
+                  metric: string
+                  value: number
+                  threshold: number
+                  slopePerMinute: number
+                  projectedMinutes: number | null
+                  severity: "critical" | "warning" | "info"
+                  detail: string
+                }>).slice(0, 3).map(item => (
+                  <div key={`${item.skydiver}-${item.label}`} className={cn("rounded-xl border p-3 text-xs", sectionSeverityClass(item.severity))}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className={cn("font-semibold", sectionTextClass(item.severity))}>{item.label}</p>
+                        <p className="text-xs text-muted-foreground">{item.skydiver}</p>
+                      </div>
+                      <Badge variant="outline" className="font-mono text-xs h-5 px-2">
+                        {item.slopePerMinute >= 0 ? "+" : ""}{item.slopePerMinute.toFixed(1)} / min
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{item.detail}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span className="rounded-full border border-border bg-background/60 px-2 py-1 font-mono">Value {item.value}</span>
+                      <span className="rounded-full border border-border bg-background/60 px-2 py-1 font-mono">Threshold {item.threshold}</span>
+                      <span className="rounded-full border border-border bg-background/60 px-2 py-1 font-mono">ETA {item.projectedMinutes ? `${item.projectedMinutes.toFixed(1)}m` : "n/a"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-background/70 p-4 space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Gemini</p>
+                    <h3 className="mt-1 text-base font-semibold text-foreground">Server-side interpretation</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="font-mono text-xs h-5 px-2">
+                      {gemini?.provider === "gemini" ? gemini.model : "fallback"}
+                    </Badge>
+                    <Badge variant="outline" className={cn("font-mono text-xs h-5 px-2", gemini && gemini.confidence > 70 ? "border-emerald-500/30 text-emerald-400" : gemini && gemini.confidence > 50 ? "border-amber-500/30 text-amber-400" : "border-border text-muted-foreground")}>
+                    </Badge>
+                    <Badge variant="outline" className={cn("font-mono text-xs h-5 px-2", gemini && gemini.confidence > 70 ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-400" : gemini && gemini.confidence > 50 ? "border-amber-500/30 text-amber-700 dark:text-amber-400" : "border-border text-muted-foreground")}>
+                      {gemini ? `${gemini.confidence}% confidence` : "pending"}
+                    </Badge>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">{gemini?.summary ?? "Waiting for Gemini analysis."}</p>
+              </div>
+
+              <div className={cn("rounded-xl border p-3 text-xs", gemini ? sectionSeverityClass(gemini.confidence >= 80 ? "critical" : gemini.confidence >= 55 ? "warning" : "info") : "border-border bg-muted/10")}>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Recommendation</p>
+                <p className="mt-1 text-sm text-foreground/90">{gemini?.recommendation ?? "Run Gemini analysis to compare model outputs."}</p>
+                {gemini?.provider === "fallback" && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300/90">
+                    {formatFallbackReason(gemini.fallbackReason, gemini.upstreamStatus)}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {geminiLoading && (
+                  <div className="rounded-xl border border-border bg-muted/10 p-3 text-xs text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Contacting Gemini for a fresh comparison.
+                  </div>
+                )}
+                {(gemini?.findings ?? []).slice(0, 4).map(item => (
+                  <div key={item.label} className={cn("rounded-xl border p-3 text-xs", sectionSeverityClass(item.severity))}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={cn("font-semibold", sectionTextClass(item.severity))}>{item.label}</p>
+                      <Badge variant="outline" className="font-mono text-xs h-5 px-2">
+                        {item.confidence}%
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/10 p-3">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Alignment</p>
+                <div className="mt-2 space-y-2">
+                  {(gemini?.alignment ?? ["Waiting for Gemini output."]).map(line => (
+                    <div key={line} className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                      <span>{line}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Individual comparison */}
       <Card className="bg-card border-border">
@@ -420,9 +601,9 @@ export default function AnalyticsPage() {
         <CardContent className="pb-4">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={anomalyData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
-              <XAxis type="number" tick={{ fill: "#64748b", fontSize: 10, fontFamily: "Fira Code" }} domain={[0, 100]} />
-              <YAxis type="category" dataKey="name" width={130} tick={{ fill: "#94a3b8", fontSize: 11, fontFamily: "Fira Sans" }} tickLine={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "Fira Code" }} domain={[0, 100]} />
+              <YAxis type="category" dataKey="name" width={130} tick={{ fill: "var(--muted-foreground)", fontSize: 11, fontFamily: "Fira Sans" }} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="risk" name="Overall Risk" fill="#ef4444" radius={[0, 3, 3, 0]} fillOpacity={0.7} />
               <Bar dataKey="stress" name="Stress" fill="#a78bfa" radius={[0, 3, 3, 0]} fillOpacity={0.6} />

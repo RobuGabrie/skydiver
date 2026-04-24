@@ -126,7 +126,7 @@
   }
   /* Base font-size 17px so rem-based Tailwind classes scale up ~6% globally */
   html {
-    font-size: 17px;
+    font-size: 19px;
     @apply font-sans;
   }
   body {

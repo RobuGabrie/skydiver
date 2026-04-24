@@ -23,17 +23,36 @@ const STATUS_CONFIG = {
 
 const CONN_ICON = { wifi: Wifi, ble: Bluetooth, offline: WifiOff }
 
-function MetricPill({ icon: Icon, value, unit, color, warning }: {
-  icon: React.ElementType; value: number | string; unit: string; color: string; warning?: boolean
+function isDetectedVital(value: number, kind: "heart" | "oxygen" | "stress" | "temp") {
+  if (!Number.isFinite(value)) return false
+  return value !== 0
+}
+
+function MetricPill({ icon: Icon, value, unit, color, warning, detected = true }: {
+  icon: React.ElementType; value: number | string; unit: string; color: string; warning?: boolean; detected?: boolean
 }) {
   return (
     <div className={cn("flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-muted/50", warning && "bg-red-500/10")}>
       <Icon className={cn("w-3.5 h-3.5 shrink-0", warning ? "text-red-500 dark:text-red-400" : color)} />
-      <span className={cn("text-sm font-mono font-medium", warning ? "text-red-600 dark:text-red-400" : "text-foreground")}>
-        {value}<span className="text-muted-foreground text-xs ml-0.5">{unit}</span>
+      <span className={cn("text-sm font-mono font-medium", warning ? "text-red-600 dark:text-red-400" : detected ? "text-foreground" : "text-muted-foreground")}>
+        {detected ? (
+          <>
+            {value}<span className="text-muted-foreground text-xs ml-0.5">{unit}</span>
+          </>
+        ) : (
+          "Non detected"
+        )}
       </span>
     </div>
   )
+}
+
+function formatLastSeen(date: Date): string {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  return `${Math.floor(mins / 60)}h ago`
 }
 
 export function SkydiverCard({ skydiver }: { skydiver: Skydiver }) {
@@ -41,15 +60,29 @@ export function SkydiverCard({ skydiver }: { skydiver: Skydiver }) {
   const ConnIcon = CONN_ICON[skydiver.connectedVia]
   const isAlert = skydiver.status === "alert"
   const isCritical = skydiver.riskScore > 60
+  const isOffline = skydiver.connectedVia === "offline"
+  const hrDetected = isDetectedVital(skydiver.heartRate, "heart")
+  const oxygenDetected = isDetectedVital(skydiver.oxygen, "oxygen")
+  const stressDetected = isDetectedVital(skydiver.stress, "stress")
+  const tempDetected = isDetectedVital(skydiver.temperature, "temp")
 
   return (
     <Card className={cn(
       "bg-card border transition-all duration-200 cursor-pointer hover:border-primary/40",
-      isAlert ? "border-red-500/50 glow-red" : "border-border",
+      isAlert && !isOffline ? "border-red-500/50 glow-red" : isOffline ? "border-amber-500/40" : "border-border",
     )}>
       <CardContent className="p-4">
+        {/* Offline banner */}
+        {isOffline && (
+          <div className="flex items-center gap-2 mb-3 px-2.5 py-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+            <WifiOff className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">Signal Lost</span>
+            <span className="text-xs text-muted-foreground ml-auto">last seen {formatLastSeen(skydiver.lastUpdate)}</span>
+          </div>
+        )}
+
         {/* Header row */}
-        <div className="flex items-start justify-between mb-3">
+        <div className={cn("flex items-start justify-between mb-3", isOffline && "opacity-60")}>
           <div className="flex items-center gap-3">
             <Avatar className="w-10 h-10 border border-border">
               <AvatarFallback className="bg-primary/10 text-primary text-sm font-mono font-semibold">
@@ -71,7 +104,7 @@ export function SkydiverCard({ skydiver }: { skydiver: Skydiver }) {
               {status.label}
             </span>
             <div className="flex items-center gap-1.5">
-              <ConnIcon className="w-3.5 h-3.5 text-muted-foreground" />
+              <ConnIcon className={cn("w-3.5 h-3.5", isOffline ? "text-amber-500" : "text-muted-foreground")} />
               {isCritical && (
                 <Tooltip>
                   <TooltipTrigger>
@@ -85,7 +118,7 @@ export function SkydiverCard({ skydiver }: { skydiver: Skydiver }) {
         </div>
 
         {/* Altitude + speed */}
-        <div className="flex items-center gap-3 mb-3 p-3 rounded-lg bg-muted/30 border border-border/50">
+        <div className={cn("flex items-center gap-3 mb-3 p-3 rounded-lg bg-muted/30 border border-border/50", isOffline && "opacity-50")}>
           <div className="flex-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">Altitude</p>
             <p className="text-2xl font-mono font-bold text-foreground leading-none">
@@ -111,11 +144,11 @@ export function SkydiverCard({ skydiver }: { skydiver: Skydiver }) {
         </div>
 
         {/* Vitals grid */}
-        <div className="grid grid-cols-2 gap-1.5 mb-3">
-          <MetricPill icon={Heart}       value={skydiver.heartRate}   unit="bpm" color="text-rose-600 dark:text-rose-400"     warning={skydiver.heartRate > 160} />
-          <MetricPill icon={Droplets}    value={skydiver.oxygen}      unit="%"   color="text-cyan-600 dark:text-cyan-400"     warning={skydiver.oxygen < 93} />
-          <MetricPill icon={Activity}    value={skydiver.stress}      unit="%"   color="text-violet-600 dark:text-violet-400" warning={skydiver.stress > 75} />
-          <MetricPill icon={Thermometer} value={skydiver.temperature} unit="°C"  color="text-orange-600 dark:text-orange-400" warning={skydiver.temperature > 37.5} />
+        <div className={cn("grid grid-cols-2 gap-1.5 mb-3", isOffline && "opacity-50")}>
+          <MetricPill icon={Heart}       value={skydiver.heartRate}   unit="bpm" color="text-rose-600 dark:text-rose-400"     warning={hrDetected && skydiver.heartRate > 160} detected={hrDetected} />
+          <MetricPill icon={Droplets}    value={skydiver.oxygen}      unit="%"   color="text-cyan-600 dark:text-cyan-400"     warning={oxygenDetected && skydiver.oxygen < 93} detected={oxygenDetected} />
+          <MetricPill icon={Activity}    value={skydiver.stress}      unit="%"   color="text-violet-600 dark:text-violet-400" warning={stressDetected && skydiver.stress > 75} detected={stressDetected} />
+          <MetricPill icon={Thermometer} value={skydiver.temperature} unit="°C"  color="text-orange-600 dark:text-orange-400" warning={tempDetected && skydiver.temperature > 37.5} detected={tempDetected} />
         </div>
 
         {/* Battery */}
